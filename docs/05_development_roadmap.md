@@ -17,6 +17,11 @@
 
 ## Phase 1: Project Setup and Development Environment
 
+**Implementation status (June 13, 2026):** Implemented. Python and frontend
+checks and local process smoke tests pass. Docker Compose configuration is
+present and parses successfully; container runtime verification remains pending
+on a machine with Docker installed.
+
 ### Goal
 
 Create a consistent local development foundation for Python, React, PostgreSQL,

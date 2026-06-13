@@ -1,5 +1,6 @@
 import pytest
 
+from scanner import cli
 from scanner.cli import main
 
 
@@ -32,3 +33,29 @@ def test_ingest_csv_reports_validation_errors(
     assert exit_code == 2
     assert '"status": "validation_failed"' in captured.err
     assert captured.err.count('"code": "file_error"') == 2
+
+
+def test_ingest_asharehub_requires_api_key(
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class SettingsWithoutKey:
+        asharehub_api_key = None
+
+    monkeypatch.setattr(cli, "get_settings", SettingsWithoutKey)
+
+    exit_code = main(
+        [
+            "ingest-asharehub",
+            "--start-date",
+            "2026-06-12",
+            "--end-date",
+            "2026-06-12",
+            "--ts-code",
+            "000001.SZ",
+        ]
+    )
+    captured = capsys.readouterr()
+
+    assert exit_code == 1
+    assert "AQR_ASHAREHUB_API_KEY is required" in captured.err

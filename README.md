@@ -19,8 +19,8 @@ Phases 1 through 3 currently provide:
 - SQLAlchemy 2.x models for stocks, daily prices, scanner runs, versioned signal
   definitions, and detected technical signals.
 - Alembic migrations for creating and removing the MVP database schema.
-- Validated, transactional CSV ingestion for stock metadata and daily OHLCV
-  prices.
+- Validated, transactional AShareHub and CSV ingestion for stock metadata and
+  daily OHLCV prices.
 - Idempotent PostgreSQL upserts and structured ingestion summaries.
 
 Technical signal scanning logic is not implemented yet.
@@ -152,9 +152,60 @@ manage persistent databases.
 
 ## Market Data Ingestion
 
-The initial provider is a local CSV importer. It does not call a broker or live
-market-data service. Import the documented synthetic sample after applying
-migrations:
+The primary Phase 3 provider is the non-broker
+[AShareHub API](https://asharehub.com/zh/docs). The deterministic local CSV
+provider remains available for development, tests, and offline fallback.
+
+### AShareHub
+
+Create an API key in the AShareHub console, then expose it only through the
+environment. Never commit the key:
+
+```powershell
+$env:AQR_ASHAREHUB_API_KEY = "your-api-key"
+```
+
+Import one stock for a bounded date range:
+
+```powershell
+python -m scanner ingest-asharehub --start-date 2026-06-12 --end-date 2026-06-12 --ts-code 000001.SZ
+```
+
+Omit `--ts-code` to import the complete Shanghai, Shenzhen, and Beijing market:
+
+```powershell
+python -m scanner ingest-asharehub --start-date 2026-06-12 --end-date 2026-06-12 --max-requests 20
+```
+
+Repeat `--ts-code` to import multiple selected stocks. Supported suffixes are
+`.SH`, `.SZ`, and `.BJ`.
+
+The command:
+
+- Fetches stock metadata and unadjusted daily OHLCV data.
+- Paginates up to 5,000 rows per request.
+- Stops before exceeding `--max-requests`, which defaults to `20`.
+- Converts AShareHub volume from lots to shares.
+- Converts AShareHub amount from CNY thousands to CNY.
+- Stores the source as `asharehub_raw`.
+- Validates the complete response before one transactional upsert.
+- Skips a price with a structured warning if the provider temporarily returns
+  it before the matching stock metadata becomes available.
+
+AShareHub currently documents a free-plan allowance of 100 requests per day.
+Check its current pricing and data-use terms before production or redistribution
+use. A `429` response is reported without retrying or partially importing data.
+
+Run the provider through Docker Compose:
+
+```powershell
+$env:AQR_ASHAREHUB_API_KEY = "your-api-key"
+docker compose -f deployment/compose.yaml --profile tools run --rm scanner ingest-asharehub --start-date 2026-06-12 --end-date 2026-06-12 --max-requests 20
+```
+
+### Local CSV
+
+Import the documented synthetic sample after applying migrations:
 
 ```sh
 python -m scanner ingest-csv \
@@ -214,7 +265,7 @@ docker compose -f deployment/compose.yaml --profile tools run --rm scanner \
 
 ### PostgreSQL Integration Test
 
-The default test suite validates models, CSV parsing, constraints,
+The default test suite validates models, AShareHub and CSV parsing, constraints,
 relationships, and offline migration SQL without requiring a running database.
 
 For a real PostgreSQL migration test, create a disposable database whose name
@@ -297,3 +348,4 @@ Application settings use the `AQR_` environment prefix:
 - `AQR_BACKEND_PORT`
 - `AQR_DATABASE_URL`
 - `AQR_DATABASE_ECHO`
+- `AQR_ASHAREHUB_API_KEY` (scanner only; secret, never commit)

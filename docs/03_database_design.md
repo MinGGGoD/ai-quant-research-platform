@@ -75,6 +75,11 @@ The initial `synthetic_csv_v1` development source uses unadjusted synthetic
 prices, synthetic CNY-denominated price and amount values, and volume measured
 in shares. These records are fixtures rather than market statements.
 
+The `asharehub_raw` source contains unadjusted AShareHub prices. Its adapter
+normalizes provider units before persistence: volume is converted from lots to
+shares and amount from CNY thousands to CNY. All persisted `daily_prices`
+records therefore use shares and CNY regardless of provider.
+
 | Field | Type | Constraints | Description |
 |---|---|---|---|
 | `id` | `BIGINT` | Primary key, generated identity | Internal row identifier |
@@ -84,8 +89,8 @@ in shares. These records are fixtures rather than market statements.
 | `high` | `NUMERIC(18,4)` | Not null | Highest price |
 | `low` | `NUMERIC(18,4)` | Not null | Lowest price |
 | `close` | `NUMERIC(18,4)` | Not null | Closing price |
-| `volume` | `BIGINT` | Not null | Traded volume in the source's documented unit |
-| `amount` | `NUMERIC(24,4)` | Nullable | Traded monetary amount |
+| `volume` | `BIGINT` | Not null | Traded volume normalized to shares |
+| `amount` | `NUMERIC(24,4)` | Nullable | Traded amount normalized to CNY |
 | `source` | `VARCHAR(64)` | Not null | Non-broker data-source identifier |
 | `created_at` | `TIMESTAMPTZ` | Not null | Initial ingestion time |
 | `updated_at` | `TIMESTAMPTZ` | Not null | Last corrected or refreshed time |

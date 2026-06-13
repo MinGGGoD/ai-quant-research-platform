@@ -22,3 +22,7 @@ class IngestionValidationError(ValueError):
 
 class IngestionPersistenceError(RuntimeError):
     """Raised when a validated batch cannot be persisted safely."""
+
+
+class MarketDataProviderError(RuntimeError):
+    """Raised when a remote market-data provider cannot return a complete batch."""

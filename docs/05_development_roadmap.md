@@ -18,9 +18,8 @@
 ## Phase 1: Project Setup and Development Environment
 
 **Implementation status (June 13, 2026):** Implemented. Python and frontend
-checks and local process smoke tests pass. Docker Compose configuration is
-present and parses successfully; container runtime verification remains pending
-on a machine with Docker installed.
+checks, local process smoke tests, Docker Compose startup, container builds, and
+PostgreSQL health checks pass.
 
 ### Goal
 
@@ -78,9 +77,8 @@ tests, linting, configuration, and the initial Docker Compose workflow.
 ## Phase 2: Database Models and Migrations
 
 **Implementation status (June 13, 2026):** Implemented. Models, Alembic
-migrations, offline PostgreSQL DDL validation, and model tests pass. The live
-PostgreSQL migration test is available but remains pending on a machine with
-Docker or PostgreSQL installed.
+migrations, offline DDL validation, model tests, and live PostgreSQL migration,
+persistence, constraint, and rollback tests pass.
 
 ### Goal
 
@@ -139,9 +137,10 @@ Implement the MVP PostgreSQL schema and a reliable migration workflow based on
 ## Phase 3: Market Data Ingestion
 
 **Implementation status (June 13, 2026):** Implemented with a provider-neutral
-interface and strict local CSV provider. Unit tests cover parsing and validation;
-PostgreSQL integration tests cover fixture import, idempotent upserts, and
-transaction rollback.
+interface, AShareHub remote provider, and strict local CSV fallback. Unit tests
+cover parsing, pagination, quota limits, unit normalization, validation, and
+secret-safe errors. Live PostgreSQL verification covers full-market daily
+import, idempotent upserts, and transaction rollback.
 
 ### Goal
 

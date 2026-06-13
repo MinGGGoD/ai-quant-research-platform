@@ -1,5 +1,6 @@
 from functools import lru_cache
 
+from pydantic import SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -14,6 +15,7 @@ class Settings(BaseSettings):
         "postgresql+psycopg://ai_quant:local_development_only@localhost:5432/ai_quant"
     )
     database_echo: bool = False
+    asharehub_api_key: SecretStr | None = None
 
     model_config = SettingsConfigDict(
         env_file=".env",

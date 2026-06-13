@@ -58,18 +58,22 @@ definitions.
 
 #### Market Data Ingestion Flow
 
-1. A researcher runs `ingest-csv` locally or through the one-shot scanner
-   container.
-2. The local-file provider reads stock metadata and daily OHLCV records.
+1. A researcher runs `ingest-asharehub` or `ingest-csv` locally or through the
+   one-shot scanner container.
+2. The selected provider reads stock metadata and daily OHLCV records.
 3. The importer validates symbols, exchanges, dates, values, duplicate keys,
    OHLC relationships, and optional freshness expectations.
 4. A single database transaction upserts stocks and daily prices.
 5. The CLI returns inserted and updated counts plus structured warnings.
 
+AShareHub is the primary Phase 3 provider. It supplies unadjusted daily data for
+Shanghai, Shenzhen, and Beijing securities. The adapter normalizes volume from
+lots to shares and amount from CNY thousands to CNY before persistence. It uses
+explicit pagination and a per-run request budget to protect limited API quotas.
+
 The initial `synthetic_csv_v1` fixture uses unadjusted synthetic prices,
 synthetic CNY-denominated price and amount values, and volume measured in
-shares. Future providers must document equivalent source and adjustment
-semantics before implementation.
+shares. It remains the deterministic offline and automated-test provider.
 
 #### Scan Flow
 
@@ -118,8 +122,8 @@ validated requirement.
 The scanner should:
 
 - Run independently as a Python command-line job.
-- Import documented local market-data files through a small provider-neutral
-  interface.
+- Import approved remote or documented local market data through a small
+  provider-neutral interface.
 - Validate a complete import batch before starting database writes.
 - Upsert stock and daily-price records atomically and idempotently.
 - Accept explicit scan configuration, such as data date, stock universe, and
@@ -263,12 +267,13 @@ Daily or historical batch data supports reproducible research and lowers
 complexity. Real-time streaming would add state, latency, and reliability
 requirements that do not serve the MVP.
 
-#### Local CSV Provider Before External Integrations
+#### Provider Interface with Local Fallback
 
-A strict local CSV provider keeps fixtures reproducible and avoids unstable or
-licensed external dependencies. The provider interface leaves room for approved
-non-broker sources later, but each source must document units, adjustment
-conventions, provenance, and usage constraints.
+The provider interface keeps remote acquisition separate from validation and
+persistence. AShareHub supplies practical daily market coverage, while the
+strict local CSV provider preserves reproducible tests and offline workflows.
+Every provider must document units, adjustment conventions, provenance, quota
+behavior, and usage constraints.
 
 #### Explicit Signal Rules Before User-Defined Logic
 

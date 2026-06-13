@@ -24,9 +24,9 @@ The schema follows these principles:
 ```mermaid
 erDiagram
     STOCKS ||--o{ DAILY_PRICES : has
-    STOCKS ||--o{ DETECTED_SIGNALS : matches
-    SIGNAL_DEFINITIONS ||--o{ DETECTED_SIGNALS : classifies
-    SCANNER_RUNS ||--o{ DETECTED_SIGNALS : produces
+    STOCKS ||--o{ TECHNICAL_SIGNALS : matches
+    SIGNAL_DEFINITIONS ||--o{ TECHNICAL_SIGNALS : classifies
+    SCANNER_RUNS ||--o{ TECHNICAL_SIGNALS : produces
     STOCKS ||--o{ RESEARCH_NOTES : concerns
     SCANNER_RUNS ||--o{ RESEARCH_NOTES : contextualizes
 ```
@@ -200,10 +200,14 @@ Stores the lifecycle, configuration, and summary of each CLI scanner execution.
 | `warning_count` | `2` |
 | `error_count` | `0` |
 
-### 7. Table: `detected_signals`
+### 7. Table: `technical_signals`
 
 Stores positive signal matches produced by scanner runs. Valid non-matches are
 represented by run summary counts rather than one row per stock and rule.
+
+The implementation uses `technical_signals` as the table name to match the
+Phase 2 domain terminology. It has the same role as the earlier
+`detected_signals` proposal.
 
 | Field | Type | Constraints | Description |
 |---|---|---|---|
@@ -307,9 +311,9 @@ until the feature is implemented.
 
 #### Surrogate Keys with Domain Uniqueness
 
-Generated `BIGINT` and `UUID` primary keys keep relationships stable, while
-unique constraints enforce domain rules such as one daily record per stock and
-date.
+Generated `BIGINT` and application-generated `UUID` primary keys keep
+relationships stable, while unique constraints enforce domain rules such as one
+daily record per stock and date.
 
 #### Separate Signal Definitions and Matches
 

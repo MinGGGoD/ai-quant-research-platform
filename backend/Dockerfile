@@ -5,7 +5,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-COPY pyproject.toml README.md requirements.lock ./
+COPY pyproject.toml README.md requirements.lock alembic.ini ./
 COPY backend ./backend
 COPY scanner ./scanner
 

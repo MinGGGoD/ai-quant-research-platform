@@ -77,6 +77,11 @@ tests, linting, configuration, and the initial Docker Compose workflow.
 
 ## Phase 2: Database Models and Migrations
 
+**Implementation status (June 13, 2026):** Implemented. Models, Alembic
+migrations, offline PostgreSQL DDL validation, and model tests pass. The live
+PostgreSQL migration test is available but remains pending on a machine with
+Docker or PostgreSQL installed.
+
 ### Goal
 
 Implement the MVP PostgreSQL schema and a reliable migration workflow based on
@@ -91,7 +96,7 @@ Implement the MVP PostgreSQL schema and a reliable migration workflow based on
   - `daily_prices`
   - `signal_definitions`
   - `scanner_runs`
-  - `detected_signals`
+  - `technical_signals`
 - Add documented primary keys, foreign keys, unique constraints, checks, and
   indexes.
 - Define shared database enums or validated string values without creating
@@ -117,7 +122,7 @@ Implement the MVP PostgreSQL schema and a reliable migration workflow based on
 - A clean PostgreSQL database can migrate from zero to the latest schema.
 - All MVP tables, constraints, and indexes match the documented design.
 - The latest migration can be rolled back in a disposable test database.
-- Duplicate daily prices and duplicate detected signals are rejected.
+- Duplicate daily prices and duplicate technical signals are rejected.
 - Foreign-key relationships preserve scan and signal traceability.
 - Backend and scanner database access use the same documented schema.
 

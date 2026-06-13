@@ -10,6 +10,10 @@ class Settings(BaseSettings):
     environment: str = "development"
     backend_host: str = "0.0.0.0"
     backend_port: int = 8000
+    database_url: str = (
+        "postgresql+psycopg://ai_quant:local_development_only@localhost:5432/ai_quant"
+    )
+    database_echo: bool = False
 
     model_config = SettingsConfigDict(
         env_file=".env",

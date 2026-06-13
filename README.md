@@ -9,16 +9,18 @@ recommendations.
 
 ## Current Status
 
-Phase 1 establishes the local development environment:
+Phases 1 and 2 currently provide:
 
 - Minimal FastAPI backend with a liveness endpoint.
 - Python scanner command-line shell with no scanning logic.
 - React and TypeScript application shell with no dashboard features.
 - PostgreSQL, backend, frontend, and scanner Docker Compose definitions.
 - Python and frontend formatting, linting, type checking, and test tooling.
+- SQLAlchemy 2.x models for stocks, daily prices, scanner runs, versioned signal
+  definitions, and detected technical signals.
+- Alembic migrations for creating and removing the MVP database schema.
 
-Database models begin in Phase 2. Market ingestion and scanning logic are not
-implemented yet.
+Market ingestion and scanning logic are not implemented yet.
 
 ## Requirements
 
@@ -91,6 +93,82 @@ npm run dev
 
 Open `http://localhost:5173`.
 
+## Database Setup and Migrations
+
+The default local connection is:
+
+```text
+postgresql+psycopg://ai_quant:local_development_only@localhost:5432/ai_quant
+```
+
+Override it with `AQR_DATABASE_URL`. Do not use the example password outside an
+isolated local development environment.
+
+Start PostgreSQL with Docker Compose:
+
+```sh
+docker compose -f deployment/compose.yaml up -d postgres
+```
+
+Apply migrations from the local Python environment:
+
+```sh
+alembic upgrade head
+alembic current
+```
+
+Or run migrations inside the backend container:
+
+```sh
+docker compose -f deployment/compose.yaml run --rm backend alembic upgrade head
+```
+
+Generate the SQL without connecting to PostgreSQL:
+
+```sh
+alembic upgrade head --sql
+```
+
+Roll back the most recent migration only against a disposable or intentionally
+managed database:
+
+```sh
+alembic downgrade -1
+```
+
+The initial migration creates:
+
+- `stocks`
+- `daily_prices`
+- `scanner_runs`
+- `signal_definitions`
+- `technical_signals`
+
+Application code must use migrations rather than `Base.metadata.create_all()` to
+manage persistent databases.
+
+### PostgreSQL Integration Test
+
+The default test suite validates models, constraints, relationships, and offline
+migration SQL without requiring a running database.
+
+For a real PostgreSQL migration test, create a disposable database whose name
+ends in `_test`:
+
+```powershell
+docker compose -f deployment/compose.yaml exec postgres `
+  createdb -U ai_quant ai_quant_test
+
+$env:TEST_DATABASE_URL = `
+  "postgresql+psycopg://ai_quant:local_development_only@localhost:5432/ai_quant_test"
+
+pytest -m postgres
+```
+
+The tests reject database names that do not end in `_test`, apply all
+migrations, verify tables and basic model persistence, exercise a unique
+constraint and rollback, and then downgrade back to an empty schema.
+
 ### Docker Compose
 
 From the repository root:
@@ -146,11 +224,10 @@ npm run format:check
 
 ## Configuration
 
-Application settings use the `AQR_` environment prefix. Phase 1 settings include:
+Application settings use the `AQR_` environment prefix:
 
 - `AQR_ENVIRONMENT`
 - `AQR_BACKEND_HOST`
 - `AQR_BACKEND_PORT`
-
-PostgreSQL values are present for the local container, but application database
-integration begins in Phase 2.
+- `AQR_DATABASE_URL`
+- `AQR_DATABASE_ECHO`

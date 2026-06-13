@@ -138,6 +138,11 @@ Implement the MVP PostgreSQL schema and a reliable migration workflow based on
 
 ## Phase 3: Market Data Ingestion
 
+**Implementation status (June 13, 2026):** Implemented with a provider-neutral
+interface and strict local CSV provider. Unit tests cover parsing and validation;
+PostgreSQL integration tests cover fixture import, idempotent upserts, and
+transaction rollback.
+
 ### Goal
 
 Load validated A-share stock metadata and daily OHLCV data into PostgreSQL from

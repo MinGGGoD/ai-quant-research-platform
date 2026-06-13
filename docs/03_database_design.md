@@ -71,6 +71,10 @@ Stores canonical daily OHLCV records used by charts and signal calculations.
 All records for a given dataset must use a documented and consistent price
 adjustment convention.
 
+The initial `synthetic_csv_v1` development source uses unadjusted synthetic
+prices, synthetic CNY-denominated price and amount values, and volume measured
+in shares. These records are fixtures rather than market statements.
+
 | Field | Type | Constraints | Description |
 |---|---|---|---|
 | `id` | `BIGINT` | Primary key, generated identity | Internal row identifier |

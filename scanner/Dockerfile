@@ -8,6 +8,7 @@ WORKDIR /app
 COPY pyproject.toml README.md requirements.lock ./
 COPY backend ./backend
 COPY scanner ./scanner
+COPY data ./data
 
 RUN pip install --no-cache-dir -r requirements.lock \
     && pip install --no-cache-dir --no-deps .

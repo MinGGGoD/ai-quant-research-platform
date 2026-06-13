@@ -38,8 +38,8 @@ flowchart LR
 
 - `backend/`: FastAPI application, API schemas, database access, and migrations.
 - `frontend/`: React dashboard for scan history, results, filters, and charts.
-- `scanner/`: CLI entry point, data validation, indicators, signal rules, and
-  scan persistence.
+- `scanner/`: CLI entry point, market-data ingestion and validation, indicators,
+  signal rules, and scan persistence.
 - `data/`: Local development fixtures, documented imports, and non-sensitive
   sample data.
 - `deployment/`: Docker Compose and environment configuration.
@@ -56,17 +56,29 @@ definitions.
 
 ### 3. Data Flow
 
-#### Market Data and Scan Flow
+#### Market Data Ingestion Flow
 
-1. A researcher runs the scanner through a local command or a one-shot Docker
+1. A researcher runs `ingest-csv` locally or through the one-shot scanner
+   container.
+2. The local-file provider reads stock metadata and daily OHLCV records.
+3. The importer validates symbols, exchanges, dates, values, duplicate keys,
+   OHLC relationships, and optional freshness expectations.
+4. A single database transaction upserts stocks and daily prices.
+5. The CLI returns inserted and updated counts plus structured warnings.
+
+The initial `synthetic_csv_v1` fixture uses unadjusted synthetic prices,
+synthetic CNY-denominated price and amount values, and volume measured in
+shares. Future providers must document equivalent source and adjustment
+semantics before implementation.
+
+#### Scan Flow
+
+1. A researcher starts the scanner through a local command or one-shot Docker
    Compose command.
-2. The scanner loads historical A-share data from a configured non-broker source
-   or supported local import.
-3. The scanner validates symbols, dates, required price and volume fields, and
-   data freshness.
+2. The scanner loads persisted historical A-share data.
+3. The scanner validates data availability and freshness.
 4. The scanner creates a scan-run record with its configuration and data date.
-5. Technical indicators and signal rules are evaluated deterministically for
-   each eligible stock.
+5. Technical indicators and signal rules are evaluated deterministically.
 6. Results, matched values, warnings, and errors are stored in PostgreSQL.
 7. The scan run is marked completed, completed with warnings, or failed.
 
@@ -106,6 +118,10 @@ validated requirement.
 The scanner should:
 
 - Run independently as a Python command-line job.
+- Import documented local market-data files through a small provider-neutral
+  interface.
+- Validate a complete import batch before starting database writes.
+- Upsert stock and daily-price records atomically and idempotently.
 - Accept explicit scan configuration, such as data date, stock universe, and
   enabled signal definitions.
 - Load data only from approved non-broker sources or local files.
@@ -246,6 +262,13 @@ be extracted later if scale or team boundaries justify it.
 Daily or historical batch data supports reproducible research and lowers
 complexity. Real-time streaming would add state, latency, and reliability
 requirements that do not serve the MVP.
+
+#### Local CSV Provider Before External Integrations
+
+A strict local CSV provider keeps fixtures reproducible and avoids unstable or
+licensed external dependencies. The provider interface leaves room for approved
+non-broker sources later, but each source must document units, adjustment
+conventions, provenance, and usage constraints.
 
 #### Explicit Signal Rules Before User-Defined Logic
 

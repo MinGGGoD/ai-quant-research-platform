@@ -9,7 +9,7 @@ recommendations.
 
 ## Current Status
 
-Phases 1 and 2 currently provide:
+Phases 1 through 3 currently provide:
 
 - Minimal FastAPI backend with a liveness endpoint.
 - Python scanner command-line shell with no scanning logic.
@@ -19,8 +19,11 @@ Phases 1 and 2 currently provide:
 - SQLAlchemy 2.x models for stocks, daily prices, scanner runs, versioned signal
   definitions, and detected technical signals.
 - Alembic migrations for creating and removing the MVP database schema.
+- Validated, transactional CSV ingestion for stock metadata and daily OHLCV
+  prices.
+- Idempotent PostgreSQL upserts and structured ingestion summaries.
 
-Market ingestion and scanning logic are not implemented yet.
+Technical signal scanning logic is not implemented yet.
 
 ## Requirements
 
@@ -147,10 +150,72 @@ The initial migration creates:
 Application code must use migrations rather than `Base.metadata.create_all()` to
 manage persistent databases.
 
+## Market Data Ingestion
+
+The initial provider is a local CSV importer. It does not call a broker or live
+market-data service. Import the documented synthetic sample after applying
+migrations:
+
+```sh
+python -m scanner ingest-csv \
+  --stocks-file data/sample/stocks.csv \
+  --prices-file data/sample/daily_prices.csv \
+  --source synthetic_csv_v1 \
+  --expected-through 2026-06-13
+```
+
+PowerShell accepts the same command on one line:
+
+```powershell
+python -m scanner ingest-csv --stocks-file data/sample/stocks.csv --prices-file data/sample/daily_prices.csv --source synthetic_csv_v1 --expected-through 2026-06-13
+```
+
+The command validates the complete batch before writing and imports stocks and
+prices in one database transaction. Re-running it updates the existing
+(`exchange`, `symbol`) and (`stock_id`, `trade_date`) records instead of creating
+duplicates.
+
+Stock CSV required columns:
+
+- `symbol`, `exchange`, `name`
+- Optional: `list_date`, `delist_date`, `status`
+
+Daily-price CSV required columns:
+
+- `symbol`, `exchange`, `trade_date`
+- `open`, `high`, `low`, `close`, `volume`
+- Optional: `amount`
+
+Dates must use `YYYY-MM-DD`. Supported exchanges are `SSE`, `SZSE`, and `BSE`.
+The importer rejects malformed, negative, non-finite, duplicate, and invalid
+OHLC records. `--expected-through` enables future-date rejection and stale-data
+warnings; `--max-staleness-days` defaults to `7`.
+
+The sample files in `data/sample/` are deterministic synthetic data:
+
+- Price adjustment: unadjusted synthetic prices.
+- Price and amount denomination: synthetic CNY values.
+- Volume unit: shares.
+- Stored source identifier: `synthetic_csv_v1`.
+
+These values are development fixtures, not market facts or investment
+recommendations.
+
+Run the same sample through the scanner container:
+
+```sh
+docker compose -f deployment/compose.yaml --profile tools run --rm scanner \
+  ingest-csv \
+  --stocks-file data/sample/stocks.csv \
+  --prices-file data/sample/daily_prices.csv \
+  --source synthetic_csv_v1 \
+  --expected-through 2026-06-13
+```
+
 ### PostgreSQL Integration Test
 
-The default test suite validates models, constraints, relationships, and offline
-migration SQL without requiring a running database.
+The default test suite validates models, CSV parsing, constraints,
+relationships, and offline migration SQL without requiring a running database.
 
 For a real PostgreSQL migration test, create a disposable database whose name
 ends in `_test`:
@@ -166,8 +231,9 @@ pytest -m postgres
 ```
 
 The tests reject database names that do not end in `_test`, apply all
-migrations, verify tables and basic model persistence, exercise a unique
-constraint and rollback, and then downgrade back to an empty schema.
+migrations, verify tables and model persistence, exercise constraints, test
+idempotent CSV imports and transaction rollback, and then downgrade back to an
+empty schema.
 
 ### Docker Compose
 

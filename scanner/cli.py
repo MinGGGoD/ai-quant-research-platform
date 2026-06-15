@@ -1,5 +1,6 @@
 import argparse
 import json
+import re
 import sys
 from collections.abc import Sequence
 from datetime import date
@@ -16,9 +17,19 @@ from scanner.ingestion import (
     MarketDataProviderError,
     ingest_market_data,
 )
+from scanner.scanning import (
+    ScanConfigurationError,
+    ScanExecutionError,
+    ScanSummary,
+    StockKey,
+    run_scan,
+)
+from scanner.signals import RULES_BY_CODE
 
 SCANNER_VERSION = "0.1.0"
 MAX_REPORTED_VALIDATION_ISSUES = 50
+STOCK_CODE_PATTERN = re.compile(r"^(\d{6})\.(SH|SZ|BJ)$")
+EXCHANGE_BY_SUFFIX = {"SH": "SSE", "SZ": "SZSE", "BJ": "BSE"}
 
 
 def validation_error_payload(error: IngestionValidationError) -> dict[str, object]:
@@ -31,12 +42,24 @@ def validation_error_payload(error: IngestionValidationError) -> dict[str, objec
     }
 
 
+def parse_stock_code(value: str) -> StockKey:
+    normalized = value.strip().upper()
+    match = STOCK_CODE_PATTERN.fullmatch(normalized)
+    if match is None:
+        raise argparse.ArgumentTypeError(
+            "stock must use six digits plus .SH, .SZ, or .BJ"
+        )
+    symbol, suffix = match.groups()
+    return EXCHANGE_BY_SUFFIX[suffix], symbol
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="quant-scanner",
         description=(
             "AI Quant Research Platform scanner. "
-            "Market data ingestion is available; scanning begins in Phase 4."
+            "Imports market data and detects deterministic technical signals "
+            "for research."
         ),
     )
     parser.add_argument(
@@ -113,6 +136,37 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=20,
         help="Maximum AShareHub requests allowed for this import.",
+    )
+    scan_parser = subparsers.add_parser(
+        "scan",
+        help="Detect and store deterministic technical signals.",
+    )
+    scan_parser.add_argument(
+        "--data-date",
+        type=date.fromisoformat,
+        required=True,
+        help="Trading date to evaluate in YYYY-MM-DD format.",
+    )
+    scan_parser.add_argument(
+        "--stock",
+        action="append",
+        type=parse_stock_code,
+        default=[],
+        help=(
+            "Optional stock code such as 000001.SZ. Repeat for multiple stocks; "
+            "omit to scan all active and suspended stocks."
+        ),
+    )
+    scan_parser.add_argument(
+        "--signal",
+        action="append",
+        choices=tuple(RULES_BY_CODE),
+        default=[],
+        help="Signal code to evaluate. Repeat as needed; omit to run all signals.",
+    )
+    scan_parser.add_argument(
+        "--universe-name",
+        help="Optional descriptive name stored with the scanner run.",
     )
     return parser
 
@@ -201,6 +255,49 @@ def main(argv: Sequence[str] | None = None) -> int:
                 indent=2,
             )
         )
+        return 0
+
+    if args.command == "scan":
+        try:
+            scan_summary: ScanSummary = run_scan(
+                args.data_date,
+                stock_keys=tuple(args.stock),
+                signal_codes=tuple(args.signal),
+                universe_name=args.universe_name,
+            )
+        except ScanConfigurationError as error:
+            print(
+                json.dumps(
+                    {"status": "configuration_failed", "error": str(error)},
+                    indent=2,
+                ),
+                file=sys.stderr,
+            )
+            return 2
+        except ScanExecutionError as error:
+            print(
+                json.dumps(
+                    {
+                        "status": "failed",
+                        "run_id": str(error.run_id),
+                        "error": str(error),
+                    },
+                    indent=2,
+                ),
+                file=sys.stderr,
+            )
+            return 1
+        except SQLAlchemyError as error:
+            print(
+                json.dumps(
+                    {"status": "failed", "error": str(error)},
+                    indent=2,
+                ),
+                file=sys.stderr,
+            )
+            return 1
+
+        print(json.dumps(scan_summary.to_dict(), indent=2))
         return 0
 
     parser.error(f"Unsupported command: {args.command}")

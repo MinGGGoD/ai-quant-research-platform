@@ -9,11 +9,12 @@ recommendations.
 
 ## Current Status
 
-Phases 1 through 3 currently provide:
+Phases 1 through 6 provide the local MVP. Phases 7 and 8 add optional AI and
+research-document retrieval extensions:
 
-- Minimal FastAPI backend with a liveness endpoint.
-- Python scanner command-line shell with no scanning logic.
-- React and TypeScript application shell with no dashboard features.
+- FastAPI liveness, readiness, stock, price, scanner-run, and signal endpoints.
+- Python scanner CLI for market-data ingestion and technical signal detection.
+- Responsive React and TypeScript research dashboard.
 - PostgreSQL, backend, frontend, and scanner Docker Compose definitions.
 - Python and frontend formatting, linting, type checking, and test tooling.
 - SQLAlchemy 2.x models for stocks, daily prices, scanner runs, versioned signal
@@ -22,8 +23,18 @@ Phases 1 through 3 currently provide:
 - Validated, transactional AShareHub and CSV ingestion for stock metadata and
   daily OHLCV prices.
 - Idempotent PostgreSQL upserts and structured ingestion summaries.
-
-Technical signal scanning logic is not implemented yet.
+- Versioned `moving_average_cross`, `recent_breakout`, and `volume_spike`
+  research signals.
+- Persisted scanner-run lifecycle, matched evidence, warnings, and failures.
+- Pydantic API responses, pagination, symbol lookup, and structured API errors.
+- Stock search and selection, SVG daily K-line and volume charts, stored
+  technical signals, and recent scanner-run history.
+- Provider-neutral research-note generation from stored stock details, recent
+  price summaries, and detected technical signals.
+- Persisted note provenance, model metadata, prompt versions, and source
+  context with an output safety gate.
+- Local `.txt`, `.md`, and text-based `.pdf` document ingestion with chunking,
+  pgvector storage, semantic retrieval, filters, and citations.
 
 ## Requirements
 
@@ -41,14 +52,62 @@ The initial setup has been tested with Python 3.11 and Node.js 24.
 - `deployment/`: Docker Compose configuration.
 - `docs/`: Product and technical design documents.
 - `tests/`: Future cross-component and end-to-end tests.
-- `ai/`: Future AI report generation.
-- `rag/`: Future retrieval-augmented generation.
+- `ai/`: Provider-neutral research-note contracts, prompts, safety checks, and
+  OpenAI-compatible generation.
+- `rag/`: Document loading, chunking, embedding abstractions, and retrieval.
 - `data/`: Future fixtures and local data workspace.
 
 ## Local Setup
 
 Copy `.env.example` to `.env` only when local overrides are needed. Never commit
 the resulting `.env`.
+
+### Bash Helper Scripts
+
+The repository root contains Bash wrappers for the common local workflows.
+They work with Git Bash or WSL on Windows and ordinary Bash on macOS or Linux.
+
+First-time local dependency setup:
+
+```sh
+bash setup.sh
+```
+
+Build images, start PostgreSQL, apply migrations, and start the backend and
+frontend:
+
+```sh
+bash start.sh
+```
+
+On Windows, `start.sh` attempts to launch Docker Desktop when it is installed
+but not currently running. PowerShell's `bash` command may open WSL; the helper
+scripts detect that case and use Docker Desktop's Windows CLI directly, so
+Docker Desktop's per-distribution WSL integration is not required.
+
+Use the existing images for a faster restart when application dependencies have
+not changed:
+
+```sh
+bash start.sh --no-build
+```
+
+Other common commands:
+
+```sh
+bash status.sh
+bash logs.sh
+bash logs.sh backend
+bash migrate.sh
+bash restart.sh --no-build
+bash stop.sh
+bash test.sh
+bash test.sh frontend
+bash scanner.sh --help
+```
+
+`stop.sh` preserves the PostgreSQL data volume. These scripts intentionally do
+not provide an automatic volume-deletion command.
 
 ### Python
 
@@ -95,6 +154,27 @@ npm run dev
 ```
 
 Open `http://localhost:5173`.
+
+The dashboard reads `VITE_API_BASE_URL`, which defaults to
+`http://localhost:8000`. Start PostgreSQL and the backend first:
+
+```powershell
+docker compose -f deployment/compose.yaml up -d postgres backend
+cd frontend
+npm run dev
+```
+
+The dashboard provides:
+
+- Paginated active-stock search and selection.
+- Up to 250 recent daily K-line and volume records for the selected stock.
+- Stored technical signals with deterministic matched values and explanations.
+- The eight most recent scanner runs with market dates and summary counts.
+- Loading, empty, backend-error, retry, and responsive narrow-screen states.
+
+The chart displays exactly the historical records returned by the API. A short
+history, including a single available day, remains visibly sparse and is not
+expanded into an implied trend.
 
 ## Database Setup and Migrations
 
@@ -263,10 +343,271 @@ docker compose -f deployment/compose.yaml --profile tools run --rm scanner \
   --expected-through 2026-06-13
 ```
 
+## Technical Signal Scanner
+
+Phase 4 provides three deterministic version 1 research signals:
+
+- `moving_average_cross`: the 5-day moving average crosses above or below the
+  20-day moving average.
+- `recent_breakout`: the evaluated close is strictly above the highest price
+  from the previous 20 trading sessions.
+- `volume_spike`: evaluated volume is at least 2 times the average volume from
+  the previous 20 trading sessions.
+
+Each rule requires 21 daily bars, including the evaluated date. The comparison
+windows exclude the evaluated bar where appropriate. Results describe technical
+conditions only; they are not buy, sell, or investment recommendations.
+
+## Interactive Market Chart
+
+The dashboard requests up to 1,000 stored daily bars for the selected stock.
+The chart provides:
+
+- Daily, weekly, and monthly K-line levels.
+- Weekly and monthly OHLCV aggregation from stored daily records.
+- MA5, MA10, MA20, MA30, and MA60 overlays.
+- Dashed horizontal and vertical crosshairs on hover.
+- Hovered-date OHLC, percentage change, volume, and moving-average values.
+- A visible warning when the stored history is too short for longer indicators.
+
+The current database contract contains daily data only. `1W` and `1M` are
+transparent aggregations of those daily records; minute and other intraday
+levels are not displayed because the platform has no intraday source or schema.
+
+If a chart contains only one candle, inspect the stored history and import a
+larger date range:
+
+```powershell
+python -m scanner ingest-asharehub --start-date 2025-01-01 --end-date 2026-06-12 --ts-code 002130.SZ --max-requests 5
+```
+
+Use dates appropriate to the selected stock and available provider quota.
+
+After importing sufficient history, scan all active and suspended stocks:
+
+```powershell
+python -m scanner scan --data-date 2026-06-12
+```
+
+Scan selected stocks and signals:
+
+```powershell
+python -m scanner scan `
+  --data-date 2026-06-12 `
+  --stock 000001.SZ `
+  --stock 600519.SH `
+  --signal moving_average_cross `
+  --signal volume_spike `
+  --universe-name selected_research_sample
+```
+
+Omit `--stock` to use the default A-share universe. Omit `--signal` to evaluate
+all three rules. Stock suffixes `.SH`, `.SZ`, and `.BJ` map to the persisted
+`SSE`, `SZSE`, and `BSE` exchanges.
+
+The command creates a `scanner_runs` record before evaluation. Successful
+matches are stored in `technical_signals` with their versioned definition,
+calculated values, and neutral explanation. Missing evaluated-date data or
+fewer than 21 bars increments the warning count and does not create a match.
+Unexpected failures roll back signal writes and leave the run marked `failed`.
+
+Run the scanner through Docker Compose:
+
+```powershell
+docker compose -f deployment/compose.yaml --profile tools run --rm scanner `
+  scan --data-date 2026-06-12 --stock 000001.SZ
+```
+
+## Backend API
+
+Start PostgreSQL, apply migrations, and run FastAPI:
+
+```powershell
+docker compose -f deployment/compose.yaml up -d postgres
+alembic upgrade head
+uvicorn backend.app.main:app --reload
+```
+
+Interactive OpenAPI documentation is available at
+`http://localhost:8000/docs`. Canonical resources use `/api/v1`; the same
+implemented read resources also have hidden unversioned aliases for local
+compatibility.
+
+Check liveness and database readiness:
+
+```powershell
+Invoke-RestMethod http://localhost:8000/health
+Invoke-RestMethod http://localhost:8000/api/v1/health
+```
+
+List active stocks with pagination:
+
+```powershell
+Invoke-RestMethod "http://localhost:8000/api/v1/stocks?query=600519&limit=20&offset=0"
+```
+
+Get stock details and daily prices:
+
+```powershell
+Invoke-RestMethod http://localhost:8000/api/v1/stocks/600519.SH
+Invoke-RestMethod "http://localhost:8000/api/v1/stocks/600519/prices?exchange=SSE&limit=250"
+```
+
+List scanner runs and detected signals:
+
+```powershell
+Invoke-RestMethod "http://localhost:8000/api/v1/scanner-runs?limit=20"
+Invoke-RestMethod "http://localhost:8000/api/v1/signals?signal_code=volume_spike&limit=20"
+Invoke-RestMethod "http://localhost:8000/api/v1/stocks/600519/signals?exchange=SSE"
+```
+
+Collection endpoints return `items` and `pagination` with `limit`, `offset`, and
+`total`. Errors include a stable code and request ID. This API exposes historical
+research data, optional generated notes, and local document retrieval; it has no
+authentication in the local MVP and contains no broker, order, execution, or
+agent endpoints.
+
+Browser access is restricted to origins in `AQR_CORS_ORIGINS`, represented as a
+JSON array. The default allows only `http://localhost:5173`.
+
+## AI Research Notes
+
+Research-note generation is disabled by default. Configure an
+OpenAI-compatible service in `.env`:
+
+```dotenv
+AQR_AI_PROVIDER=openai_compatible
+AQR_AI_BASE_URL=https://api.openai.com/v1
+AQR_AI_API_KEY=replace_with_a_local_secret
+AQR_AI_MODEL=replace_with_a_supported_model
+```
+
+Apply the Phase 7 migration and start the backend:
+
+```powershell
+alembic upgrade head
+uvicorn backend.app.main:app --reload
+```
+
+Generate a note from stored context:
+
+```powershell
+$body = @{
+  price_window = 20
+  signal_limit = 20
+} | ConvertTo-Json
+
+Invoke-RestMethod `
+  -Method Post `
+  -Uri "http://localhost:8000/api/v1/stocks/600519/research-notes?exchange=SSE" `
+  -ContentType "application/json" `
+  -Body $body
+```
+
+Retrieve stored notes:
+
+```powershell
+Invoke-RestMethod `
+  "http://localhost:8000/api/v1/stocks/600519/research-notes?exchange=SSE"
+Invoke-RestMethod `
+  "http://localhost:8000/api/v1/research-notes/{note_id}"
+```
+
+The backend constructs model input only from stored stock metadata, a bounded
+daily-price summary, and stored technical signals. It does not accept a
+free-form prompt. Generated output is checked for action-oriented or guaranteed
+outcome language before the note is committed. Provider failures do not affect
+market ingestion, scanning, dashboard reads, or existing stored notes.
+
+## RAG Knowledge Base
+
+Phase 8 uses the `pgvector` extension in the existing PostgreSQL service.
+Documents must be supplied locally; the platform has no paid-report scraper or
+remote document downloader.
+
+Supported formats:
+
+- UTF-8 `.txt`
+- UTF-8 `.md`
+- Text-based `.pdf`
+
+Apply the migration and start the backend:
+
+```powershell
+alembic upgrade head
+docker compose -f deployment/compose.yaml up --build -d postgres backend
+```
+
+Upload a document after confirming that it may be stored and processed:
+
+```powershell
+curl.exe -X POST "http://localhost:8000/api/v1/documents" `
+  -F "file=@C:\research\annual-report.pdf;type=application/pdf" `
+  -F "document_type=annual_report" `
+  -F "rights_confirmed=true" `
+  -F "stock_id=1"
+```
+
+Search indexed chunks:
+
+```powershell
+$body = @{
+  query = "operating cash flow and revenue observations"
+  document_type = "annual_report"
+  limit = 10
+  minimum_score = 0.0
+} | ConvertTo-Json
+
+Invoke-RestMethod `
+  -Method Post `
+  -Uri "http://localhost:8000/api/v1/documents/search" `
+  -ContentType "application/json" `
+  -Body $body
+```
+
+The response contains chunk text, similarity scores, document identifiers,
+source names, optional stock references, and chunk indexes for citation.
+Uploading identical extracted text is idempotent. Deleting a document through
+`DELETE /api/v1/documents/{document_id}` removes its chunks.
+
+The default `local_hash` embedding provider is deterministic, offline, and
+suited to development and tests. It mainly captures shared terms and character
+features; configure an OpenAI-compatible embedding provider for stronger
+semantic retrieval:
+
+```dotenv
+AQR_RAG_EMBEDDING_PROVIDER=openai_compatible
+AQR_RAG_EMBEDDING_BASE_URL=https://api.openai.com/v1
+AQR_RAG_EMBEDDING_API_KEY=replace_with_a_local_secret
+AQR_RAG_EMBEDDING_MODEL=replace_with_a_supported_embedding_model
+```
+
+The database schema uses fixed 256-dimensional vectors. The configured provider
+must support 256-dimensional output. Search compares only vectors created by
+the currently configured embedding model. Delete and re-upload documents, or
+run a future re-embedding migration, before changing models.
+
+### Full MVP with Docker Compose
+
+Build and start PostgreSQL, the backend, and the frontend:
+
+```powershell
+docker compose -f deployment/compose.yaml up --build -d
+```
+
+Open:
+
+- Dashboard: `http://localhost:5173`
+- API documentation: `http://localhost:8000/docs`
+
+Import sufficient market history and run the scanner through the documented
+one-shot scanner commands to populate charts and technical signals.
+
 ### PostgreSQL Integration Test
 
-The default test suite validates models, AShareHub and CSV parsing, constraints,
-relationships, and offline migration SQL without requiring a running database.
+The default test suite validates models, AShareHub and CSV parsing, signal
+calculations, CLI behavior, constraints, relationships, and offline migration
+SQL without requiring a running database.
 
 For a real PostgreSQL migration test, create a disposable database whose name
 ends in `_test`:
@@ -283,8 +624,8 @@ pytest -m postgres
 
 The tests reject database names that do not end in `_test`, apply all
 migrations, verify tables and model persistence, exercise constraints, test
-idempotent CSV imports and transaction rollback, and then downgrade back to an
-empty schema.
+idempotent CSV imports, scanner lifecycle and persistence, transaction rollback,
+and then downgrade back to an empty schema.
 
 ### Docker Compose
 
@@ -348,4 +689,23 @@ Application settings use the `AQR_` environment prefix:
 - `AQR_BACKEND_PORT`
 - `AQR_DATABASE_URL`
 - `AQR_DATABASE_ECHO`
+- `AQR_CORS_ORIGINS`
 - `AQR_ASHAREHUB_API_KEY` (scanner only; secret, never commit)
+- `AQR_AI_PROVIDER` (`disabled` or `openai_compatible`)
+- `AQR_AI_BASE_URL`
+- `AQR_AI_API_KEY` (backend only; secret, never commit)
+- `AQR_AI_MODEL`
+- `AQR_AI_TIMEOUT_SECONDS`
+- `AQR_AI_MAX_ATTEMPTS`
+- `AQR_AI_MAX_OUTPUT_CHARACTERS`
+- `AQR_AI_MAX_OUTPUT_TOKENS`
+- `AQR_RAG_EMBEDDING_PROVIDER` (`local_hash` or `openai_compatible`)
+- `AQR_RAG_EMBEDDING_BASE_URL`
+- `AQR_RAG_EMBEDDING_API_KEY` (backend only; secret, never commit)
+- `AQR_RAG_EMBEDDING_MODEL`
+- `AQR_RAG_EMBEDDING_DIMENSIONS` (must remain `256` for this schema version)
+- `AQR_RAG_EMBEDDING_TIMEOUT_SECONDS`
+- `AQR_RAG_EMBEDDING_MAX_ATTEMPTS`
+- `AQR_RAG_CHUNK_SIZE`
+- `AQR_RAG_CHUNK_OVERLAP`
+- `AQR_RAG_MAX_DOCUMENT_BYTES`

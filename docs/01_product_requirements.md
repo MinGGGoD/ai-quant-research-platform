@@ -80,6 +80,9 @@ dashboard.
 - Filter results by date, stock code or name, and signal type.
 - Provide a stock-level detail view with the values that caused each match.
 - Clearly display the market-data date and scan execution time.
+- Display stored daily K-line data with daily, weekly, and monthly research
+  views, moving averages, volume, hover inspection, and zoom/pan navigation.
+- Keep up to six recently searched or opened stocks as local browser shortcuts.
 - Present neutral research data without action-oriented language.
 
 #### 4.6 Operational Baseline
@@ -101,10 +104,11 @@ The following are explicitly outside the MVP:
 - Personalized investment recommendations or action prompts.
 - Return guarantees, price forecasts presented as certain outcomes, or stock
   ranking framed as a directive.
-- AI-generated research reports.
+- AI-generated research notes are outside the Phase 1-6 MVP baseline and are
+  delivered as an optional Phase 7 extension.
 - AI agents, autonomous workflows, or LangGraph orchestration.
-- RAG pipelines, document ingestion, embeddings, semantic retrieval, or vector
-  databases.
+- RAG capabilities are outside the Phase 1-6 MVP baseline and are delivered as
+  an optional Phase 8 extension.
 - Full strategy backtesting and portfolio-level performance simulation.
 - Real-time streaming quotes or intraday low-latency scanning.
 - Mobile applications, social features, billing, or multi-tenant administration.
@@ -163,6 +167,21 @@ The MVP is successful when:
 
 ### 8. Future Expansion Ideas
 
+Phase 7 now provides:
+
+- Neutral research notes generated from stored stock metadata, bounded recent
+  price summaries, and detected technical signals.
+- Traceable model, prompt-version, generation, and source-context metadata.
+- Stored note retrieval without requiring the model provider to remain online.
+
+Phase 8 now provides:
+
+- User-supplied local research document ingestion for approved announcements,
+  annual reports, research notes, and other educational material.
+- Traceable chunking, embedding, pgvector storage, semantic search, and
+  citations.
+- Explicit rights confirmation and no remote paid-report scraping.
+
 Future phases may include:
 
 - Additional technical indicators, composite signals, and user-defined rules.
@@ -170,10 +189,8 @@ Future phases may include:
 - Broader data-quality monitoring and source comparison.
 - Reproducible strategy backtesting using historical data.
 - Portfolio research and risk-analysis tools without execution capabilities.
-- AI-generated summaries that describe stored research results using an
-  OpenAI-compatible LLM interface.
-- RAG-based retrieval across research notes, filings, announcements, and
-  educational material.
+- Human review and evaluation workflows for generated research notes.
+- OCR for scanned documents and broader approved document formats.
 - LangGraph-based research agents with explicit human review and bounded tools.
 - Saved dashboards, experiment comparison, and collaborative research notes.
 - Additional markets and asset classes after A-share workflows are stable.

@@ -70,7 +70,10 @@ Expected error status codes:
 - `400 Bad Request`: invalid parameter combinations or unsupported operations
 - `404 Not Found`: requested stock, run, or other resource does not exist
 - `409 Conflict`: request conflicts with current scanner state
+- `413 Payload Too Large`: uploaded document exceeds the configured limit
+- `415 Unsupported Media Type`: uploaded document format is unsupported
 - `422 Unprocessable Entity`: request does not match the declared schema
+- `502 Bad Gateway`: configured AI or embedding provider failed
 - `500 Internal Server Error`: unexpected application failure
 - `503 Service Unavailable`: database or required local service is unavailable
 
@@ -84,12 +87,22 @@ framework-internal response details.
 | `GET` | `/health` | Process liveness check |
 | `GET` | `/api/v1/health` | API and database readiness check |
 | `GET` | `/api/v1/stocks` | List and filter stocks |
-| `GET` | `/api/v1/stocks/{stock_id}/daily-prices` | Get daily K-line data |
+| `GET` | `/api/v1/stocks/{symbol}` | Get one stock |
+| `GET` | `/api/v1/stocks/{symbol}/prices` | Get daily K-line data |
 | `GET` | `/api/v1/scanner-runs` | List scanner runs |
 | `GET` | `/api/v1/scanner-runs/{run_id}` | Get one scanner run |
 | `GET` | `/api/v1/signals` | List detected signals |
-| `GET` | `/api/v1/stocks/{stock_id}/signals` | Get signals for one stock |
+| `GET` | `/api/v1/stocks/{symbol}/signals` | Get signals for one stock |
 | `POST` | `/api/v1/scanner-runs` | Optionally trigger a local scan |
+| `POST` | `/api/v1/documents` | Upload and index an approved local document |
+| `POST` | `/api/v1/documents/search` | Search indexed document chunks |
+| `GET` | `/api/v1/documents/{document_id}` | Get document metadata |
+| `DELETE` | `/api/v1/documents/{document_id}` | Delete a document and its chunks |
+
+The `/api/v1` paths are canonical. Phase 5 also exposes hidden, unversioned
+aliases for the implemented read resources, such as `/stocks` and
+`/scanner-runs`, for local compatibility. They use the same handlers and are not
+separate API contracts.
 
 ### 5. Health Check
 
@@ -215,17 +228,40 @@ Results are ordered by `exchange`, then `symbol`.
 - Debounce free-text search in the browser.
 - Do not load the full stock universe when a paginated search is sufficient.
 
-### 7. Get Daily K-Line Data for One Stock
+### 7. Get One Stock and Daily K-Line Data
+
+#### 7.1 Get One Stock
 
 **Method and path**
 
-`GET /api/v1/stocks/{stock_id}/daily-prices`
+`GET /api/v1/stocks/{symbol}`
+
+`symbol` may be an exchange-local code such as `600519`, with an optional
+`exchange=SSE` query parameter, or a suffixed code such as `600519.SH`.
+Supported suffix mappings are `.SH` to `SSE`, `.SZ` to `SZSE`, and `.BJ` to
+`BSE`.
+
+The response uses the same stock object as the stock-list endpoint.
+
+**Error cases**
+
+- `400`: unsupported suffix, exchange, or conflicting suffix and exchange
+- `404`: stock does not exist
+- `409`: the local symbol is ambiguous and no exchange was supplied
+- `503`: database unavailable
+
+#### 7.2 Get Daily K-Line Data
+
+**Method and path**
+
+`GET /api/v1/stocks/{symbol}/prices`
 
 **Request parameters**
 
 | Name | Location | Type | Required | Description |
 |---|---|---|---|---|
-| `stock_id` | Path | `integer` | Yes | Internal stock ID |
+| `symbol` | Path | `string` | Yes | Local or suffixed stock code |
+| `exchange` | Query | `string` | No | `SSE`, `SZSE`, or `BSE`; useful with a local code |
 | `from_date` | Query | `date` | No | Inclusive start trading date |
 | `to_date` | Query | `date` | No | Inclusive end trading date |
 | `limit` | Query | `integer` | No | Maximum rows from 1 to 1000; defaults to 250 |
@@ -283,6 +319,10 @@ The values above are illustrative.
 **Frontend usage**
 
 - Use the response directly for daily candlestick and volume charts.
+- The frontend may aggregate ordered daily rows into calendar-week and
+  calendar-month research views. It must label these as derived from daily data.
+- Calculate display-only moving averages in the browser when no shared backend
+  indicator contract is required.
 - Preserve chronological order when passing data to the chart library.
 - Display the data source and adjustment convention near the chart.
 - An empty `items` array means the stock exists but has no data in the requested
@@ -369,7 +409,7 @@ Results are ordered by `started_at` descending.
   "parameters": {
     "signals": [
       {
-        "code": "ma_cross_up",
+        "code": "moving_average_cross",
         "version": 1
       }
     ]
@@ -437,9 +477,9 @@ code.
         "name": "Kweichow Moutai"
       },
       "signal": {
-        "code": "ma_cross_up",
+        "code": "moving_average_cross",
         "version": 1,
-        "name": "Moving Average Upward Cross"
+        "name": "Moving Average Cross"
       },
       "matched_values": {
         "ma_5": 1418.42,
@@ -476,13 +516,14 @@ code.
 
 **Method and path**
 
-`GET /api/v1/stocks/{stock_id}/signals`
+`GET /api/v1/stocks/{symbol}/signals`
 
 **Request parameters**
 
 | Name | Location | Type | Required | Description |
 |---|---|---|---|---|
-| `stock_id` | Path | `integer` | Yes | Internal stock ID |
+| `symbol` | Path | `string` | Yes | Local or suffixed stock code |
+| `exchange` | Query | `string` | No | `SSE`, `SZSE`, or `BSE`; useful with a local code |
 | `signal_code` | Query | `string` | No | Filter by stable signal code |
 | `from_date` | Query | `date` | No | Inclusive minimum signal date |
 | `to_date` | Query | `date` | No | Inclusive maximum signal date |
@@ -507,9 +548,9 @@ Results are ordered by `signal_date` descending.
       "scanner_run_id": "c62d4313-9199-4f27-a8f7-c64284e78792",
       "signal_date": "2026-06-12",
       "signal": {
-        "code": "ma_cross_up",
+        "code": "moving_average_cross",
         "version": 1,
-        "name": "Moving Average Upward Cross"
+        "name": "Moving Average Cross"
       },
       "matched_values": {
         "ma_5": 1418.42,
@@ -557,7 +598,7 @@ release. It should be disabled by default through configuration.
   "universe_name": "a_share_sample",
   "signals": [
     {
-      "code": "ma_cross_up",
+      "code": "moving_average_cross",
       "version": 1
     }
   ]
@@ -614,10 +655,269 @@ release. It should be disabled by default through configuration.
 - This endpoint performs research scans only. It cannot place orders or access
   brokerage systems.
 
-### 13. Frontend and Browser Considerations
+### 13. Generate and Retrieve Research Notes
+
+Phase 7 adds optional research-note endpoints. Model input is assembled by the
+backend from stored data; callers cannot submit a free-form prompt.
+
+#### 13.1 Generate a Research Note
+
+**Method and path**
+
+`POST /api/v1/stocks/{symbol}/research-notes`
+
+**Request parameters**
+
+| Name | Location | Type | Required | Description |
+|---|---|---|---|---|
+| `symbol` | Path | `string` | Yes | Local or suffixed stock code |
+| `exchange` | Query | `string` | No | `SSE`, `SZSE`, or `BSE` |
+| `scanner_run_id` | Body | `UUID` | No | Restrict signal context to one stored run |
+| `price_window` | Body | `integer` | No | Recent daily records to summarize, 1-120; default 20 |
+| `signal_limit` | Body | `integer` | No | Maximum stored signals to include, 1-50; default 20 |
+
+**Request example**
+
+```json
+{
+  "scanner_run_id": "c62d4313-9199-4f27-a8f7-c64284e78792",
+  "price_window": 20,
+  "signal_limit": 20
+}
+```
+
+**Response example: `201 Created`**
+
+```json
+{
+  "id": "b9572374-b8da-4d22-bbf3-91a8d0c97a97",
+  "stock": {
+    "id": 1,
+    "symbol": "600519",
+    "exchange": "SSE",
+    "name": "Kweichow Moutai"
+  },
+  "scanner_run_id": "c62d4313-9199-4f27-a8f7-c64284e78792",
+  "title": "Research observations for 600519 through 2026-06-12",
+  "content": "Observations\nThe stored period shows measurable price variation.\nTechnical patterns\nA deterministic volume pattern was recorded.\nRisk factors\nHistorical patterns may not persist.\nLimitations\nThe note uses only the bounded stored context.",
+  "source_type": "ai_generated",
+  "model_name": "configured-compatible-model",
+  "prompt_version": "research-note-v1",
+  "metadata": {
+    "context": {
+      "price_summary": {
+        "record_count": 20,
+        "end_date": "2026-06-12"
+      }
+    },
+    "generation": {
+      "request_id": "provider-request-id"
+    }
+  },
+  "created_at": "2026-06-13T12:00:00Z",
+  "updated_at": "2026-06-13T12:00:00Z"
+}
+```
+
+**Error cases**
+
+- `404`: stock or supplied scanner run does not exist
+- `409`: the stock has no stored daily price context
+- `422`: malformed body or parameter
+- `502`: provider failure, malformed response, or output safety rejection
+- `503`: generation is disabled, incompletely configured, or the database is
+  unavailable
+
+The note is committed only after output validation succeeds. Provider secrets
+and the full request prompt are not stored.
+
+#### 13.2 List Notes for One Stock
+
+**Method and path**
+
+`GET /api/v1/stocks/{symbol}/research-notes`
+
+Supports `exchange`, `limit`, and `offset`. Results are ordered by creation time
+descending and return the normal `items` plus `pagination` envelope with a
+`stock` reference.
+
+#### 13.3 Get One Research Note
+
+**Method and path**
+
+`GET /api/v1/research-notes/{note_id}`
+
+Returns the same research-note response contract used by generation. A missing
+identifier returns `404 research_note_not_found`. Retrieval does not require a
+configured model provider.
+
+**Frontend usage**
+
+- Display generated content as informational observations with model and prompt
+  provenance.
+- Keep stored source context available for inspection.
+- Show provider failures separately from missing market data.
+- Do not imply that generated text changes deterministic scanner results.
+
+### 14. Research Document Knowledge Base
+
+Phase 8 adds optional local document ingestion and semantic search. It accepts
+only caller-supplied files and does not scrape or download paid reports.
+
+#### 14.1 Upload and Index a Document
+
+**Method and path**
+
+`POST /api/v1/documents`
+
+**Content type**
+
+`multipart/form-data`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `file` | file | Yes | UTF-8 `.txt`, UTF-8 `.md`, or text-based `.pdf` |
+| `document_type` | string | Yes | `company_announcement`, `annual_report`, `research_note`, or `other` |
+| `rights_confirmed` | boolean | Yes | Confirms the file may be stored and processed locally |
+| `title` | string | No | Defaults to the source filename without its extension |
+| `stock_id` | integer | No | Optional related stock identifier |
+
+**Response example: `201 Created`**
+
+```json
+{
+  "created": true,
+  "document": {
+    "id": "d6f21111-5d0f-4556-a389-3cd2c7acaa30",
+    "stock": {
+      "id": 1,
+      "symbol": "600519",
+      "exchange": "SSE",
+      "name": "Kweichow Moutai"
+    },
+    "document_type": "annual_report",
+    "title": "Illustrative 2025 Annual Report",
+    "source_name": "illustrative-annual-report.pdf",
+    "source_uri": null,
+    "mime_type": "application/pdf",
+    "content_sha256": "9e20f3...",
+    "byte_size": 284120,
+    "character_count": 184532,
+    "page_count": 96,
+    "embedding_model": "local-hash-v1",
+    "embedding_dimensions": 256,
+    "metadata": {
+      "ingestion": "local_upload",
+      "rights_confirmed": true
+    },
+    "chunk_count": 173,
+    "created_at": "2026-06-13T12:00:00Z",
+    "updated_at": "2026-06-13T12:00:00Z"
+  }
+}
+```
+
+Uploading content with an existing normalized-text hash is idempotent and
+returns `200 OK` with `created: false`.
+
+**Error cases**
+
+- `400`: rights not confirmed, empty or unreadable document, or unsupported
+  document type
+- `404`: supplied `stock_id` does not exist
+- `409`: identical content is already indexed with another embedding model
+- `413`: file exceeds the configured byte limit
+- `415`: file format is unsupported
+- `502`: embedding provider failed
+- `503`: RAG configuration or database is unavailable
+
+#### 14.2 Search Documents
+
+**Method and path**
+
+`POST /api/v1/documents/search`
+
+**Request example**
+
+```json
+{
+  "query": "operating cash flow and revenue observations",
+  "document_type": "annual_report",
+  "stock_id": 1,
+  "limit": 10,
+  "minimum_score": 0.0
+}
+```
+
+`query` is required. `document_type` and `stock_id` are optional filters.
+`limit` is from 1 to 50 and defaults to 10. `minimum_score` is from 0 to 1 and
+defaults to 0.
+
+**Response example: `200 OK`**
+
+```json
+{
+  "query": "operating cash flow and revenue observations",
+  "embedding_model": "local-hash-v1",
+  "items": [
+    {
+      "score": 0.73,
+      "content": "Illustrative operating cash flow observations...",
+      "citation": {
+        "document_id": "d6f21111-5d0f-4556-a389-3cd2c7acaa30",
+        "title": "Illustrative 2025 Annual Report",
+        "document_type": "annual_report",
+        "source_name": "illustrative-annual-report.pdf",
+        "source_uri": null,
+        "stock": {
+          "id": 1,
+          "symbol": "600519",
+          "exchange": "SSE",
+          "name": "Kweichow Moutai"
+        },
+        "chunk_id": "fefc90cd-9c95-4201-a7bd-3ca10dbf1ac8",
+        "chunk_index": 0
+      }
+    }
+  ]
+}
+```
+
+Results are ordered by pgvector cosine similarity. Scores compare vectors from
+the configured provider and must not be interpreted as factual confidence.
+
+**Error cases**
+
+- `400`: empty query or unsupported document type
+- `404`: supplied `stock_id` does not exist
+- `422`: invalid limit, score, or body type
+- `502`: embedding provider failed
+- `503`: RAG configuration or database is unavailable
+
+#### 14.3 Get Document Metadata
+
+`GET /api/v1/documents/{document_id}` returns the document object from the
+upload response. It does not return every chunk or the original binary file.
+A missing identifier returns `404 document_not_found`.
+
+#### 14.4 Delete a Document
+
+`DELETE /api/v1/documents/{document_id}` returns `204 No Content`. Deletion
+cascades to every stored chunk and vector so the source no longer appears in
+search. A missing identifier returns `404 document_not_found`.
+
+**Frontend usage**
+
+- Display citations and source names with every retrieved chunk.
+- Treat search as research-document discovery, not advice or factual
+  verification.
+- Require explicit rights confirmation before upload.
+- Show ingestion and provider failures independently from empty search results.
+
+### 15. Frontend and Browser Considerations
 
 - Configure CORS only for explicit local frontend origins, such as
-  `http://localhost:3000`; do not use unrestricted origins outside isolated
+  `http://localhost:5173`; do not use unrestricted origins outside isolated
   development.
 - Keep API base URLs configurable through frontend environment settings.
 - Use request IDs from error responses when showing diagnostic details.
@@ -627,7 +927,7 @@ release. It should be disabled by default through configuration.
   associated scanner run confirms the stock was processed.
 - Display dates and timestamps clearly; market dates are not execution times.
 
-### 14. Non-Goals
+### 16. Non-Goals
 
 The MVP API does not include:
 
@@ -635,5 +935,6 @@ The MVP API does not include:
 - Real-money or paper-trading execution.
 - Personalized recommendations or action-oriented stock rankings.
 - Real-time quote streaming or WebSocket feeds.
-- AI-generated reports, chat, agents, embeddings, or document retrieval.
+- AI chat or multi-agent workflows.
+- OCR, paid-report scraping, and unattended remote document downloading.
 - User accounts, roles, or public internet deployment controls.

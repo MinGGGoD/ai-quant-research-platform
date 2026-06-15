@@ -5,8 +5,9 @@
 ### 1. Scope and Principles
 
 PostgreSQL is the MVP system of record for stock metadata, daily K-line data,
-scanner history, and detected technical signals. A simple research-notes table
-is reserved for a future AI phase but is not required to run the MVP.
+scanner history, and detected technical signals. Later optional phases add
+research notes and an approved-document knowledge base without changing the
+Phase 1-6 scanner and dashboard contract.
 
 The schema follows these principles:
 
@@ -29,6 +30,8 @@ erDiagram
     SCANNER_RUNS ||--o{ TECHNICAL_SIGNALS : produces
     STOCKS ||--o{ RESEARCH_NOTES : concerns
     SCANNER_RUNS ||--o{ RESEARCH_NOTES : contextualizes
+    STOCKS ||--o{ KNOWLEDGE_DOCUMENTS : concerns
+    KNOWLEDGE_DOCUMENTS ||--o{ DOCUMENT_CHUNKS : contains
 ```
 
 ### 3. Table: `stocks`
@@ -154,7 +157,19 @@ when a rule changes.
 
 | `id` | `code` | `version` | `name` | `parameters` | `is_active` |
 |---:|---|---:|---|---|---|
-| 10 | `ma_cross_up` | 1 | `Moving Average Upward Cross` | `{"short_window": 5, "long_window": 20}` | true |
+| 10 | `moving_average_cross` | 1 | `Moving Average Cross` | `{"short_window": 5, "long_window": 20, "directions": ["above", "below"]}` | true |
+
+The initial Phase 4 definitions are:
+
+- `moving_average_cross` version 1: 5-day versus 20-day crossing in either
+  direction.
+- `recent_breakout` version 1: close above the preceding 20-session high.
+- `volume_spike` version 1: volume at least 2 times the preceding 20-session
+  average.
+
+Each definition requires 21 bars including the evaluated date. Changing a
+calculation rule or parameter requires a new version rather than updating an
+existing definition in place.
 
 ### 6. Table: `scanner_runs`
 
@@ -170,7 +185,7 @@ Stores the lifecycle, configuration, and summary of each CLI scanner execution.
 | `started_at` | `TIMESTAMPTZ` | Not null | Execution start time |
 | `finished_at` | `TIMESTAMPTZ` | Nullable | Execution completion time |
 | `total_stocks` | `INTEGER` | Not null, default `0` | Stocks selected for evaluation |
-| `processed_stocks` | `INTEGER` | Not null, default `0` | Stocks successfully evaluated |
+| `processed_stocks` | `INTEGER` | Not null, default `0` | Stocks fully evaluated by every selected rule |
 | `matched_stocks` | `INTEGER` | Not null, default `0` | Distinct stocks with at least one match |
 | `warning_count` | `INTEGER` | Not null, default `0` | Data-quality or non-fatal warning count |
 | `error_count` | `INTEGER` | Not null, default `0` | Processing error count |
@@ -200,7 +215,7 @@ Stores the lifecycle, configuration, and summary of each CLI scanner execution.
 | `status` | `completed_with_warnings` |
 | `data_date` | `2026-06-12` |
 | `universe_name` | `a_share_sample` |
-| `parameters` | `{"signals": [{"code": "ma_cross_up", "version": 1}]}` |
+| `parameters` | `{"signals": [{"code": "moving_average_cross", "version": 1}], "stock_selection": "all_active_and_suspended", "max_history_bars": 21}` |
 | `started_at` | `2026-06-13T02:00:00Z` |
 | `finished_at` | `2026-06-13T02:03:18Z` |
 | `total_stocks` | `100` |
@@ -260,17 +275,16 @@ explicitly supported. Normal application behavior should preserve scan history.
 | `stock_id` | `1` |
 | `signal_definition_id` | `10` |
 | `signal_date` | `2026-06-12` |
-| `matched_values` | `{"ma_5": 1418.42, "ma_20": 1415.08, "previous_ma_5": 1412.10, "previous_ma_20": 1413.72}` |
-| `explanation` | `The 5-day moving average crossed above the 20-day moving average on the evaluated date.` |
+| `matched_values` | `{"direction": "above", "short_window": 5, "long_window": 20, "previous_short_ma": 1412.10, "previous_long_ma": 1413.72, "current_short_ma": 1418.42, "current_long_ma": 1415.08}` |
+| `explanation` | `The 5-day moving average crossed above the 20-day moving average on the evaluated date. This is a descriptive technical signal for research.` |
 
 This record describes a rule match for research inspection. It is not an action
 or recommendation.
 
-### 8. Future Table: `research_notes`
+### 8. Table: `research_notes`
 
-This table is reserved for a future phase that stores manual or AI-generated
-research summaries. It is not required by the MVP and should not be created
-until the feature is implemented.
+Phase 7 creates this table for traceable manual or AI-generated research
+summaries. It remains an optional extension to the Phase 1-6 MVP.
 
 | Field | Type | Constraints | Description |
 |---|---|---|---|
@@ -316,7 +330,117 @@ until the feature is implemented.
 | `model_name` | `openai-compatible-model` |
 | `prompt_version` | `research-summary-v1` |
 
-### 9. Design Rationale
+### 9. Table: `knowledge_documents`
+
+Phase 8 stores provenance and ingestion metadata for user-supplied local
+documents. The application accepts approved text, Markdown, and text-based PDF
+files; it does not download or scrape paid research.
+
+| Field | Type | Constraints | Description |
+|---|---|---|---|
+| `id` | `UUID` | Primary key | Knowledge-document identifier |
+| `stock_id` | `BIGINT` | Nullable, foreign key | Optional reference to `stocks.id` |
+| `document_type` | `VARCHAR(32)` | Not null | `company_announcement`, `annual_report`, `research_note`, or `other` |
+| `title` | `VARCHAR(256)` | Not null | Human-readable document title |
+| `source_name` | `VARCHAR(512)` | Not null | Original local filename or source label |
+| `source_uri` | `VARCHAR(2048)` | Nullable | Optional source locator for future approved loaders |
+| `mime_type` | `VARCHAR(128)` | Not null | Normalized source media type |
+| `content_sha256` | `VARCHAR(64)` | Not null, unique | Hash of normalized extracted text |
+| `byte_size` | `BIGINT` | Not null | Uploaded file size |
+| `character_count` | `INTEGER` | Not null | Normalized extracted-text length |
+| `page_count` | `INTEGER` | Nullable | PDF page count when applicable |
+| `embedding_model` | `VARCHAR(128)` | Not null | Embedding model used for all chunks |
+| `embedding_dimensions` | `INTEGER` | Not null | Fixed at 256 in this schema version |
+| `metadata` | `JSONB` | Not null, default `{}` | Provenance and rights-confirmation metadata |
+| `created_at` | `TIMESTAMPTZ` | Not null | Initial ingestion time |
+| `updated_at` | `TIMESTAMPTZ` | Not null | Last metadata update time |
+
+**Keys and constraints**
+
+- Primary key: `id`
+- Foreign key: `stock_id` references `stocks.id` with delete restricted
+- Unique constraint: `content_sha256`
+- Check constraints:
+  - `document_type` is one of the four supported values.
+  - `byte_size` is non-negative and `character_count` is positive.
+  - `page_count` is null or positive.
+  - `embedding_dimensions` equals 256.
+
+**Index suggestions**
+
+- Unique B-tree index on `content_sha256` for idempotent ingestion.
+- B-tree index on (`stock_id`, `created_at` descending).
+- B-tree index on (`document_type`, `created_at` descending).
+
+**Example record**
+
+| Field | Example value |
+|---|---|
+| `id` | `d6f21111-5d0f-4556-a389-3cd2c7acaa30` |
+| `stock_id` | `1` |
+| `document_type` | `annual_report` |
+| `title` | `Illustrative 2025 Annual Report` |
+| `source_name` | `illustrative-annual-report.pdf` |
+| `mime_type` | `application/pdf` |
+| `content_sha256` | `9e20f3...` |
+| `byte_size` | `284120` |
+| `character_count` | `184532` |
+| `page_count` | `96` |
+| `embedding_model` | `local-hash-v1` |
+| `embedding_dimensions` | `256` |
+| `metadata` | `{"ingestion": "local_upload", "rights_confirmed": true}` |
+
+### 10. Table: `document_chunks`
+
+Stores normalized document segments and their vectors. Chunk text is retained
+so every search result can include a stable citation and inspectable evidence.
+
+| Field | Type | Constraints | Description |
+|---|---|---|---|
+| `id` | `UUID` | Primary key | Chunk identifier |
+| `document_id` | `UUID` | Not null, foreign key | References `knowledge_documents.id` |
+| `chunk_index` | `INTEGER` | Not null | Zero-based order within the document |
+| `content` | `TEXT` | Not null | Normalized chunk text |
+| `content_sha256` | `VARCHAR(64)` | Not null | Hash of the chunk text |
+| `start_character` | `INTEGER` | Not null | Inclusive offset in normalized document text |
+| `end_character` | `INTEGER` | Not null | Exclusive offset in normalized document text |
+| `character_count` | `INTEGER` | Not null | Chunk text length |
+| `embedding` | `VECTOR(256)` | Not null | Embedding used for cosine similarity |
+| `metadata` | `JSONB` | Not null, default `{}` | Chunk-level extraction metadata |
+| `created_at` | `TIMESTAMPTZ` | Not null | Chunk creation time |
+
+**Keys and constraints**
+
+- Primary key: `id`
+- Foreign key: `document_id` references `knowledge_documents.id` with delete
+  cascade
+- Unique constraint: (`document_id`, `chunk_index`)
+- Check constraints:
+  - `chunk_index` and `start_character` are non-negative.
+  - `end_character` is greater than `start_character`.
+  - `character_count` is positive.
+
+**Index suggestions**
+
+- B-tree index on `document_id` for document retrieval and deletion.
+- HNSW index on `embedding vector_cosine_ops` for semantic search.
+- Do not add full-text or per-stock vector indexes until measured query patterns
+  justify them.
+
+**Example record**
+
+| Field | Example value |
+|---|---|
+| `id` | `fefc90cd-9c95-4201-a7bd-3ca10dbf1ac8` |
+| `document_id` | `d6f21111-5d0f-4556-a389-3cd2c7acaa30` |
+| `chunk_index` | `0` |
+| `content` | `Illustrative operating cash flow observations...` |
+| `start_character` | `0` |
+| `end_character` | `1148` |
+| `character_count` | `1148` |
+| `embedding` | `[0.012, -0.041, ...]` |
+
+### 11. Design Rationale
 
 #### Surrogate Keys with Domain Uniqueness
 
@@ -355,7 +479,22 @@ The research-notes shape records provenance needed for future generated content,
 but the MVP scanner, backend, database migrations, and dashboard must not depend
 on it.
 
-### 10. Migration and Data Integrity Guidance
+#### PostgreSQL and pgvector Together
+
+Phase 8 uses the `vector` extension in the existing PostgreSQL service rather
+than introducing a separate vector database. This keeps local deployment,
+transactions, foreign keys, deletion, and backups simple. The 256-dimensional
+schema is intentionally fixed; changing dimensions requires an explicit
+migration and re-embedding workflow.
+
+#### Traceable and Rights-Aware Documents
+
+Normalized content hashes make repeated ingestion idempotent. Source metadata
+records that local processing rights were confirmed, while stored chunk text
+and offsets make retrieval results inspectable. This is a provenance aid, not a
+substitute for legal review or permission to ingest copyrighted material.
+
+### 12. Migration and Data Integrity Guidance
 
 - Manage schema changes through version-controlled SQLAlchemy migrations.
 - Apply migrations explicitly before starting the backend or scanner.
@@ -364,5 +503,10 @@ on it.
 - Preserve completed scanner runs and their signal definitions for auditability.
 - Use UTC for system timestamps and exchange-local dates for `trade_date`.
 - Keep fixture records synthetic or clearly labeled as illustrative.
+- Enable the PostgreSQL `vector` extension before creating Phase 8 tables.
+- Delete document chunks with their parent document so removed sources cannot
+  remain searchable.
+- Re-embed all affected chunks through a migration workflow before changing an
+  embedding model or dimension contract.
 - Add retention or archival policies only after actual storage requirements are
   measured.

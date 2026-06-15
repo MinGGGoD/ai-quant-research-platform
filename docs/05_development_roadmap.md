@@ -102,7 +102,7 @@ Implement the MVP PostgreSQL schema and a reliable migration workflow based on
 - Add transaction helpers usable by the backend and scanner.
 - Add deterministic database fixtures for development and tests.
 - Document migration, rollback, reset, and fixture-loading commands.
-- Do not create the future `research_notes` table yet.
+- Defer `research_notes` until Phase 7.
 
 ### Files Likely to Be Changed
 
@@ -193,6 +193,12 @@ an approved non-broker source or local research dataset.
 
 ## Phase 4: Technical Signal Scanner
 
+**Implementation status (June 13, 2026):** Implemented with versioned
+`moving_average_cross`, `recent_breakout`, and `volume_spike` rules. Unit tests
+cover calculation boundaries and insufficient data. PostgreSQL integration
+tests cover scan lifecycle, definition reuse, result persistence, warnings, and
+failure recovery.
+
 ### Goal
 
 Build the deterministic CLI scanner that evaluates daily market data, records
@@ -247,6 +253,12 @@ scan history, and persists explainable technical signal matches.
 
 ## Phase 5: Backend API
 
+**Implementation status (June 13, 2026):** Implemented with versioned read
+routes for health, stocks, daily prices, scanner runs, and detected signals.
+Pydantic contracts, pagination, symbol lookup, request IDs, common errors, and
+PostgreSQL integration tests are included. Authentication and scan triggering
+remain intentionally out of scope.
+
 ### Goal
 
 Implement the FastAPI read API that exposes stocks, daily prices, scanner runs,
@@ -299,6 +311,14 @@ and detected signals to the frontend.
 - Add PostgreSQL-backed API integration tests.
 
 ## Phase 6: Frontend Dashboard
+
+**Implementation status (June 14, 2026):** The requested dashboard MVP scope is
+implemented. It includes stock search and selection, interactive SVG daily,
+weekly, and monthly K-line and volume charts, MA5 through MA60, hover
+crosshairs and readouts, selected-stock technical-signal evidence, recent
+scanner-run history, and loading, empty, error, retry, and responsive states.
+Weekly and monthly bars are derived from stored daily data; intraday data
+remains outside the current contract.
 
 ### Goal
 
@@ -371,7 +391,11 @@ criteria and:
 
 ## Phase 7: AI Report Generation
 
-**Future enhancement. Not required for MVP.**
+**Implementation status (June 13, 2026):** Implemented as an optional extension
+with a provider-neutral OpenAI-compatible client, stored-context prompt
+construction, output safety validation, persisted research notes, generation
+and retrieval APIs, and deterministic fake-provider tests. RAG, LangGraph, and
+frontend note display remain outside this phase.
 
 ### Goal
 
@@ -384,10 +408,11 @@ an OpenAI-compatible LLM interface.
 - Implement a provider-neutral LLM client interface.
 - Add prompt templates and explicit prompt versioning.
 - Generate reports only from stored, approved research context.
-- Persist generated reports using the future `research_notes` design.
+- Persist generated reports using the `research_notes` design.
 - Store model, prompt, parameters, timestamps, and source references.
 - Add cost, timeout, retry, and output-size controls.
-- Add human review before reports are treated as complete.
+- Keep generated notes explicitly informational; a formal human-review workflow
+  remains future work.
 - Add evaluation fixtures for factual grounding and prohibited wording.
 - Update product, system, database, and API documentation before implementation.
 
@@ -424,7 +449,12 @@ an OpenAI-compatible LLM interface.
 
 ## Phase 8: RAG Knowledge Base
 
-**Future enhancement. Not required for MVP.**
+**Implementation status (June 13, 2026):** Implemented as an optional extension
+with local text, Markdown, and text-based PDF ingestion, deterministic chunking,
+provider-neutral embeddings, pgvector storage, semantic search, citations,
+deduplication, deletion, and PostgreSQL-backed API tests. OCR, remote document
+loading, Phase 7 grounding integration, frontend document search, and LangGraph
+remain outside this phase.
 
 ### Goal
 
@@ -439,7 +469,8 @@ educational documents.
 - Select a vector database only after evaluating local requirements.
 - Store document and chunk metadata with source lineage.
 - Implement retrieval, filtering, ranking, and citation assembly.
-- Connect retrieved context to AI reports without coupling it to the scanner.
+- Define a future integration boundary for grounding AI reports without
+  coupling retrieval to the scanner; implementation is deferred.
 - Add document update and deletion workflows.
 - Build retrieval-quality evaluation datasets.
 - Update architecture, database, API, and safety documentation.
@@ -447,11 +478,8 @@ educational documents.
 ### Files Likely to Be Changed
 
 - `rag/`
-- `ai/`
 - `backend/` document and retrieval APIs
-- `frontend/` document and citation views
-- `data/` non-sensitive evaluation documents
-- `deployment/` vector-store service configuration
+- `deployment/` PostgreSQL pgvector configuration
 - `tests/` ingestion and retrieval tests
 - `.env.example`
 - `README.md`
@@ -463,14 +491,15 @@ educational documents.
 - Retrieval returns relevant chunks with citations.
 - Re-ingestion is idempotent or produces documented versions.
 - Deleted documents no longer appear in retrieval results.
-- AI output clearly distinguishes retrieved facts from generated synthesis.
+- Search results identify retrieved text and source citations without generated
+  synthesis.
 - RAG services remain optional and do not affect MVP scanning availability.
 
 ### Testing Requirements
 
 - Unit test extraction, chunking, metadata, and deduplication.
 - Test embedding and vector-store adapters with deterministic fakes.
-- Test document update and deletion behavior.
+- Test idempotent ingestion and deletion behavior.
 - Evaluate recall and citation accuracy against a fixed dataset.
 - Test unsupported, empty, malformed, and oversized documents.
 - Keep external embedding-provider tests optional.
@@ -595,8 +624,8 @@ polish the complete research platform after future modules are validated.
 | 4. Scanner | Phases 1-3 | MVP |
 | 5. Backend API | Phases 1-4 | MVP |
 | 6. Frontend | Phases 1-5 | MVP completion |
-| 7. AI reports | Stable Phase 6 | Future |
-| 8. RAG | Stable Phase 6; Phase 7 integration optional | Future |
+| 7. AI reports | Stable Phase 6 | Optional extension delivered |
+| 8. RAG | Stable Phase 6; Phase 7 integration optional | Optional extension delivered |
 | 9. LangGraph | Validated Phase 7 and/or 8 use cases | Future |
 | 10. Deployment polish | Delivered modules from preceding phases | Future |
 

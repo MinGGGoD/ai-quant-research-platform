@@ -26,9 +26,11 @@ flowchart LR
     Source["Non-broker Market Data Source"] --> Scanner
     Scanner --> Database
 
-    Database -. "Future research context" .-> AI["AI Module"]
-    Database -. "Future metadata" .-> RAG["RAG Module"]
-    Documents["Research Documents"] -.-> RAG
+    Database -->|"Stored research context"| AI["AI Module"]
+    AI -->|"Generated research note"| Database
+    Documents["Approved Local Documents"] --> RAG["RAG Module"]
+    RAG -->|"Chunks and vectors"| Database
+    Database -->|"Cosine search"| RAG
     RAG -.-> AI
 ```
 
@@ -45,10 +47,12 @@ flowchart LR
 - `deployment/`: Docker Compose and environment configuration.
 - `tests/`: Cross-module, integration, and end-to-end tests.
 
-#### Future Modules
+#### Optional Extension Modules
 
-- `ai/`: LLM provider abstraction and generated research summaries.
-- `rag/`: Document ingestion, embeddings, indexing, and retrieval.
+- `ai/`: Implemented provider abstraction, prompt versioning, safety checks, and
+  generated research notes.
+- `rag/`: Implemented local document loading, chunking, embedding abstraction,
+  indexing, and retrieval.
 
 Each module owns a clear responsibility. Cross-module contracts should remain
 small and explicit, especially database entities, API schemas, and signal
@@ -79,12 +83,29 @@ shares. It remains the deterministic offline and automated-test provider.
 
 1. A researcher starts the scanner through a local command or one-shot Docker
    Compose command.
-2. The scanner loads persisted historical A-share data.
-3. The scanner validates data availability and freshness.
-4. The scanner creates a scan-run record with its configuration and data date.
-5. Technical indicators and signal rules are evaluated deterministically.
+2. The scanner creates and commits a running scan record with its configuration
+   and data date.
+3. The scanner loads up to the required number of persisted daily bars for each
+   selected stock.
+4. Missing evaluated-date data and insufficient lookback are counted as
+   warnings rather than valid non-matches.
+5. Versioned technical indicators and signal rules are evaluated
+   deterministically.
 6. Results, matched values, warnings, and errors are stored in PostgreSQL.
 7. The scan run is marked completed, completed with warnings, or failed.
+
+The Phase 4 rule set contains:
+
+- `moving_average_cross` version 1: detect a 5-day moving average crossing above
+  or below the 20-day moving average.
+- `recent_breakout` version 1: detect a close strictly above the highest price
+  from the preceding 20 trading sessions.
+- `volume_spike` version 1: detect volume at least 2 times the average from the
+  preceding 20 trading sessions.
+
+All three rules require 21 bars including the evaluated date. The rule
+definitions and their parameters are immutable within a version. Signal
+explanations are neutral research descriptions and contain no action guidance.
 
 #### Dashboard Read Flow
 
@@ -96,8 +117,48 @@ shares. It remains the deterministic offline and automated-test provider.
 4. The frontend renders scan status, filters, signal details, and historical
    stock charts.
 
+The chart requests a bounded daily history and performs presentation-only
+calendar aggregation for weekly and monthly views. MA5, MA10, MA20, MA30, and
+MA60 are calculated over the currently selected bar level. Hover, crosshair,
+zoom, and pan state remain local to the browser. Up to six recently searched or
+opened stocks are stored in browser local storage as navigation shortcuts.
+Intraday levels are not offered because the database and provider contract
+currently store daily bars only.
+
 The database is the integration point between the scanner and backend in the
 MVP. They do not call each other directly.
+
+#### Research Note Generation Flow
+
+1. A caller requests a note for one stored stock and optionally one scanner run.
+2. The backend loads the stock, a bounded daily-price window, and bounded
+   technical-signal evidence from PostgreSQL.
+3. The backend calculates a deterministic price summary and builds a versioned
+   structured prompt.
+4. The optional OpenAI-compatible provider returns note content.
+5. The backend rejects empty, oversized, action-oriented, or guaranteed-outcome
+   language before any write.
+6. A successful note is stored with model, prompt, provider, limits, and source
+   context metadata.
+
+There is no document retrieval or agent orchestration in this flow.
+
+#### Document Retrieval Flow
+
+1. A user uploads an approved local text, Markdown, or text-based PDF document
+   and confirms that it may be processed.
+2. The backend extracts and normalizes text, computes a content hash, and
+   returns an existing record when the content was already indexed.
+3. The RAG module creates bounded overlapping chunks and generates embeddings
+   through the configured provider.
+4. PostgreSQL stores document lineage, chunk text, and fixed 256-dimensional
+   vectors through pgvector.
+5. A search query is embedded with the same provider and ranked using cosine
+   distance.
+6. The API returns relevant chunk text with document and chunk citations.
+
+No web crawler, paid-report scraper, AI synthesis, or agent workflow participates
+in this retrieval path.
 
 ### 4. Backend Responsibilities
 
@@ -112,6 +173,15 @@ The backend should:
 - Use SQLAlchemy for database access and migrations for schema evolution.
 - Keep response contracts independent from internal ORM models.
 - Enforce neutral research wording and expose no trading actions.
+- Generate and retrieve optional research notes without coupling provider
+  availability to ordinary read endpoints.
+
+Phase 5 implements these responsibilities through Pydantic response contracts,
+SQLAlchemy read queries, deterministic pagination, and a common error envelope
+with request IDs. Canonical resources live under `/api/v1`; hidden unversioned
+aliases call the same read handlers for local compatibility. Stock detail,
+price, and signal routes use market symbols with an optional exchange
+disambiguator rather than exposing internal database IDs in path navigation.
 
 For the initial MVP, scanner execution remains a CLI operation. An API-triggered
 job system can be added later if scheduling and background execution become a
@@ -141,6 +211,11 @@ The scanner should:
 The scanner must not place orders, access brokerage accounts, or depend on the
 frontend or backend being available.
 
+The implementation commits the initial `running` record separately. Signal
+definitions, detected matches, summary counts, and the terminal success state
+are then committed together. A failure rolls back that second transaction and
+updates the existing run to `failed` in a separate recovery transaction.
+
 ### 6. Frontend Responsibilities
 
 The frontend should:
@@ -158,6 +233,14 @@ The frontend should:
 The MVP frontend is a research viewer. It does not need AI chat, document search,
 portfolio execution, or real-time streaming updates.
 
+Phase 6 implements this viewer as one responsive React page with three primary
+regions: paginated stock selection, a selected-stock research area, and recent
+scanner-run history. The research area contains a dependency-free SVG daily
+K-line and volume chart plus stored technical-signal evidence. A typed fetch
+client consumes only `/api/v1` contracts. Loading, empty, retry, backend-error,
+and narrow-screen states are handled without inventing missing market data or
+signal conclusions.
+
 ### 7. Database Responsibilities
 
 PostgreSQL is the system of record for the MVP. It should store:
@@ -168,6 +251,7 @@ PostgreSQL is the system of record for the MVP. It should store:
 - Scan runs, configuration snapshots, status, timestamps, and summaries.
 - Per-stock signal results and the calculation values supporting each match.
 - Data-quality warnings and scan errors.
+- Optional generated research notes and their source-context provenance.
 
 Database design should provide:
 
@@ -180,36 +264,47 @@ Database design should provide:
 
 Detailed entities and relationships belong in `03_database_design.md`.
 
-### 8. AI Module Responsibilities for Future Phases
+### 8. AI Module Responsibilities
 
-The `ai/` module is not required by the MVP. In a future phase it may:
+The `ai/` module remains optional and is isolated from the Phase 1-6 MVP. Phase
+7 implements:
 
-- Provide an OpenAI-compatible interface independent of a specific provider.
-- Generate neutral summaries from stored scan results and approved context.
-- Return structured output with source references and model metadata.
-- Support prompt versioning, evaluation, cost controls, and audit logging.
-- Add bounded LangGraph workflows after simpler request-response flows are
-  proven insufficient.
+- An OpenAI-compatible interface independent of a specific model provider.
+- Versioned prompts built only from stored stock metadata, bounded price
+  summaries, and detected technical signals.
+- Neutral note generation with timeout, retry, output-size, and language
+  controls.
+- Persistence of model identity, prompt version, provider metadata, and the
+  exact structured context used for generation.
+- Retrieval of stored notes while the model provider is disabled or
+  unavailable.
+
+The provider is disabled by default. Generation fails independently without
+affecting ingestion, scanning, API reads, or the dashboard. RAG and LangGraph
+remain separate future phases.
 
 AI output must remain informational research. It must not initiate scans,
 modify source data, execute trades, connect to brokers, or present personalized
 investment direction.
 
-### 9. RAG Module Responsibilities for Future Phases
+### 9. RAG Module Responsibilities
 
-The `rag/` module is not required by the MVP. In a future phase it may:
+The `rag/` module is optional and isolated from the Phase 1-6 MVP. Phase 8
+implements:
 
-- Ingest approved research notes, filings, announcements, and educational
-  documents.
-- Extract, normalize, chunk, and attach metadata to document content.
-- Create embeddings through a provider-neutral interface.
-- Store vectors in a selected vector database.
-- Retrieve relevant passages with source attribution and access controls.
-- Supply grounded context to the AI module.
-- Evaluate retrieval quality and preserve document lineage.
+- Local ingestion of approved `.txt`, `.md`, and text-based `.pdf` documents.
+- Normalization, deterministic chunking, content-hash deduplication, and source
+  lineage.
+- A provider-neutral embedding interface with offline local and
+  OpenAI-compatible implementations.
+- pgvector cosine search with document type and stock filters.
+- Source-aware results with stable document, chunk, and stock citations.
+- Document deletion with cascading chunk removal.
 
-RAG storage and workers should be added only when document retrieval enters the
-product scope. PostgreSQL remains sufficient for the MVP.
+The default local embedding is deliberately lightweight and primarily useful
+for local development. External embedding quality and cost remain provider
+concerns. RAG does not automatically feed Phase 7 notes yet; that integration
+requires a separately reviewed grounding contract.
 
 ### 10. Deployment Architecture
 
@@ -222,6 +317,13 @@ The MVP runs locally with Docker Compose using these services:
   the backend API.
 - `scanner`: One-shot container invoked on demand with the same database
   connection and approved data configuration.
+
+Phase 7 does not add a separate AI container. The backend calls a configured
+OpenAI-compatible HTTPS endpoint only for explicit generation requests.
+
+Phase 8 replaces the plain PostgreSQL 17 image with the matching official
+`pgvector/pgvector:pg17` image while retaining the same persistent volume. It
+does not add a separate vector-database service.
 
 ```mermaid
 flowchart TB

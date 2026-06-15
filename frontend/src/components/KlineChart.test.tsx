@@ -52,4 +52,27 @@ describe('KlineChart', () => {
       }),
     ).toBeInTheDocument()
   })
+
+  it('prevents page scrolling while zooming with the mouse wheel', () => {
+    render(<KlineChart prices={makePrices(40)} />)
+
+    const chart = screen.getByRole('img', {
+      name: 'Daily K-line chart with 40 price records',
+    })
+    const wheelEvent = new WheelEvent('wheel', {
+      bubbles: true,
+      cancelable: true,
+      clientX: 520,
+      deltaY: -100,
+    })
+
+    fireEvent(chart, wheelEvent)
+
+    expect(wheelEvent.defaultPrevented).toBe(true)
+    expect(
+      screen.getByRole('img', {
+        name: 'Daily K-line chart showing 32 of 40 price records',
+      }),
+    ).toBeInTheDocument()
+  })
 })

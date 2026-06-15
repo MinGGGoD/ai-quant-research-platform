@@ -1,5 +1,5 @@
-import { useMemo, useRef, useState } from 'react'
-import type { KeyboardEvent, MouseEvent, PointerEvent, WheelEvent } from 'react'
+import { useEffect, useEffectEvent, useMemo, useRef, useState } from 'react'
+import type { KeyboardEvent, MouseEvent, PointerEvent } from 'react'
 
 import {
   aggregatePrices,
@@ -87,7 +87,7 @@ function movingAveragePath(
   return path.trim()
 }
 
-function KlineChart({ prices }: KlineChartProps) {
+function PopulatedKlineChart({ prices }: KlineChartProps) {
   const [interval, setInterval] = useState<ChartInterval>('1D')
   const [crosshair, setCrosshair] = useState<Crosshair | null>(null)
   const [viewportState, setViewportState] = useState<Viewport>({
@@ -102,14 +102,6 @@ function KlineChart({ prices }: KlineChartProps) {
     () => withMovingAverages(aggregatePrices(prices, interval)),
     [interval, prices],
   )
-
-  if (prices.length === 0) {
-    return (
-      <div className="empty-state chart-empty">
-        No daily price records are available for this stock.
-      </div>
-    )
-  }
 
   const viewportKey = `${interval}:${allPoints.length}:${allPoints[0]?.bar.interval_start}:${allPoints.at(-1)?.bar.interval_start}`
   const minimumVisibleCount = Math.min(MIN_VISIBLE_BARS, allPoints.length)
@@ -221,15 +213,16 @@ function KlineChart({ prices }: KlineChartProps) {
       return
     }
 
+    const clampedAnchorRatio = Math.max(0, Math.min(1, anchorRatio))
     const anchorIndex =
-      visibleStart + Math.max(0, Math.min(1, anchorRatio)) * (points.length - 1)
+      visibleStart + clampedAnchorRatio * Math.max(0, points.length - 1)
     const nextStart = Math.round(
-      anchorIndex - anchorRatio * Math.max(0, nextCount - 1),
+      anchorIndex - clampedAnchorRatio * Math.max(0, nextCount - 1),
     )
     updateViewport(nextCount, nextStart)
   }
 
-  const handleWheel = (event: WheelEvent<SVGSVGElement>) => {
+  const handleWheel = useEffectEvent((event: globalThis.WheelEvent) => {
     if (event.deltaY === 0) {
       return
     }
@@ -240,7 +233,17 @@ function KlineChart({ prices }: KlineChartProps) {
         ? (event.clientX - bounds.left) / bounds.width
         : 0.5
     zoomAt(event.deltaY < 0 ? 'in' : 'out', anchorRatio)
-  }
+  })
+
+  useEffect(() => {
+    const chart = svgRef.current
+    if (!chart) {
+      return
+    }
+
+    chart.addEventListener('wheel', handleWheel, { passive: false })
+    return () => chart.removeEventListener('wheel', handleWheel)
+  }, [])
 
   const startDragging = (event: PointerEvent<SVGSVGElement>) => {
     if (!isZoomed || event.button !== 0) {
@@ -417,7 +420,6 @@ function KlineChart({ prices }: KlineChartProps) {
           onMouseMove={updateCrosshair}
           onMouseLeave={() => setCrosshair(null)}
           onKeyDown={moveCrosshairWithKeyboard}
-          onWheel={handleWheel}
           onPointerDown={startDragging}
           onPointerMove={dragViewport}
           onPointerUp={stopDragging}
@@ -602,6 +604,18 @@ function KlineChart({ prices }: KlineChartProps) {
       </div>
     </div>
   )
+}
+
+function KlineChart({ prices }: KlineChartProps) {
+  if (prices.length === 0) {
+    return (
+      <div className="empty-state chart-empty">
+        No daily price records are available for this stock.
+      </div>
+    )
+  }
+
+  return <PopulatedKlineChart prices={prices} />
 }
 
 export default KlineChart

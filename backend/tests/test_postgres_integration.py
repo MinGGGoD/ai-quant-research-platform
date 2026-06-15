@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 
 from backend.app.database import (
     DailyPrice,
+    DailyPriceSyncRange,
     DocumentChunk,
     KnowledgeDocument,
     ResearchNote,
@@ -26,6 +27,7 @@ EXPECTED_TABLES = {
     "alembic_version",
     "stocks",
     "daily_prices",
+    "daily_price_sync_ranges",
     "document_chunks",
     "knowledge_documents",
     "scanner_runs",
@@ -91,6 +93,11 @@ def test_model_persistence_unique_constraints_and_rollback(
             amount=Decimal("10250.0000"),
             source="synthetic_fixture",
         )
+        sync_range = DailyPriceSyncRange(
+            source="asharehub_raw",
+            start_date=date(2026, 6, 1),
+            end_date=signal_date,
+        )
         scanner_run = ScannerRun(
             status="completed",
             data_date=signal_date,
@@ -144,6 +151,7 @@ def test_model_persistence_unique_constraints_and_rollback(
         )
 
         stock.daily_prices.append(price)
+        stock.price_sync_ranges.append(sync_range)
         stock.technical_signals.append(signal)
         scanner_run.technical_signals.append(signal)
         definition.technical_signals.append(signal)
@@ -155,6 +163,9 @@ def test_model_persistence_unique_constraints_and_rollback(
 
         assert session.scalar(select(func.count()).select_from(Stock)) == 1
         assert session.scalar(select(func.count()).select_from(DailyPrice)) == 1
+        assert (
+            session.scalar(select(func.count()).select_from(DailyPriceSyncRange)) == 1
+        )
         assert session.scalar(select(func.count()).select_from(TechnicalSignal)) == 1
         assert session.scalar(select(func.count()).select_from(ResearchNote)) == 1
         assert session.scalar(select(func.count()).select_from(KnowledgeDocument)) == 1

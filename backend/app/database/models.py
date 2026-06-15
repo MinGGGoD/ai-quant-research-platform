@@ -82,6 +82,10 @@ class Stock(TimestampMixin, Base):
         back_populates="stock",
         passive_deletes=True,
     )
+    price_sync_ranges: Mapped[list[DailyPriceSyncRange]] = relationship(
+        back_populates="stock",
+        passive_deletes=True,
+    )
     technical_signals: Mapped[list[TechnicalSignal]] = relationship(
         back_populates="stock",
         passive_deletes=True,
@@ -142,6 +146,36 @@ class DailyPrice(TimestampMixin, Base):
     )
 
     stock: Mapped[Stock] = relationship(back_populates="daily_prices")
+
+
+class DailyPriceSyncRange(TimestampMixin, Base):
+    __tablename__ = "daily_price_sync_ranges"
+    __table_args__ = (
+        CheckConstraint("end_date >= start_date", name="valid_date_range"),
+        Index(
+            "ix_daily_price_sync_ranges_stock_source_dates",
+            "stock_id",
+            "source",
+            "start_date",
+            "end_date",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(
+        BigInteger,
+        Identity(),
+        primary_key=True,
+    )
+    stock_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("stocks.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    source: Mapped[str] = mapped_column(String(64), nullable=False)
+    start_date: Mapped[date] = mapped_column(Date, nullable=False)
+    end_date: Mapped[date] = mapped_column(Date, nullable=False)
+
+    stock: Mapped[Stock] = relationship(back_populates="price_sync_ranges")
 
 
 class ScannerRun(TimestampMixin, Base):

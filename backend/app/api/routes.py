@@ -1,3 +1,4 @@
+from collections.abc import Iterator
 from datetime import date
 from pathlib import Path
 from typing import Annotated
@@ -24,6 +25,7 @@ from backend.app.api.repository import (
 )
 from backend.app.api.schemas import (
     DailyPriceResponse,
+    DateRangeResponse,
     DocumentCitation,
     DocumentIngestionResponse,
     DocumentSearchRequest,
@@ -44,6 +46,9 @@ from backend.app.api.schemas import (
     SignalResponse,
     StockListResponse,
     StockPricesResponse,
+    StockPriceSyncMetadata,
+    StockPriceSyncRequest,
+    StockPriceSyncResponse,
     StockReference,
     StockResponse,
     StockSignalResponse,
@@ -59,6 +64,11 @@ from backend.app.database import (
 )
 from backend.app.database.session import get_db_session
 from backend.app.main_constants import APP_VERSION
+from backend.app.services.market_data_sync import (
+    MarketDataHistoryProvider,
+    MarketDataProviderUnavailableError,
+    sync_stock_price_history,
+)
 from backend.app.services.rag_documents import (
     DocumentEmbeddingConflictError,
     EmptyDocumentError,
@@ -80,6 +90,11 @@ from rag import (
     OpenAICompatibleEmbeddingProvider,
     UnsupportedDocumentError,
     load_document_bytes,
+)
+from scanner.ingestion import (
+    AShareHubHistoryClient,
+    IngestionValidationError,
+    MarketDataProviderError,
 )
 
 DEFAULT_LIMIT = 50
@@ -176,6 +191,35 @@ def configured_embedding_provider() -> EmbeddingProvider:
 EmbeddingProviderDependency = Annotated[
     EmbeddingProvider,
     Depends(configured_embedding_provider),
+]
+
+
+def configured_market_data_history_provider() -> Iterator[
+    AShareHubHistoryClient | None
+]:
+    settings = get_settings()
+    api_key = (
+        settings.asharehub_api_key.get_secret_value().strip()
+        if settings.asharehub_api_key is not None
+        else ""
+    )
+    if not api_key:
+        yield None
+        return
+    provider = AShareHubHistoryClient(
+        api_key,
+        max_requests=settings.asharehub_sync_max_requests,
+        timeout_seconds=settings.asharehub_timeout_seconds,
+    )
+    try:
+        yield provider
+    finally:
+        provider.close()
+
+
+MarketDataHistoryProviderDependency = Annotated[
+    MarketDataHistoryProvider | None,
+    Depends(configured_market_data_history_provider),
 ]
 
 
@@ -405,6 +449,85 @@ def get_stock_prices(
     return StockPricesResponse(
         stock=StockReference.model_validate(stock),
         items=[DailyPriceResponse.model_validate(price) for price in prices],
+    )
+
+
+@resource_router.post(
+    "/stocks/{symbol}/prices/sync",
+    response_model=StockPriceSyncResponse,
+    responses=error_responses(),
+    tags=["stocks"],
+)
+def sync_stock_prices(
+    symbol: str,
+    request: StockPriceSyncRequest,
+    session: DatabaseSession,
+    provider: MarketDataHistoryProviderDependency,
+    exchange: str | None = None,
+) -> StockPriceSyncResponse:
+    validate_date_range(request.from_date, request.to_date)
+    stock = resolve_stock(session, symbol, exchange)
+    try:
+        result = sync_stock_price_history(
+            session,
+            stock=stock,
+            from_date=request.from_date,
+            to_date=request.to_date,
+            provider=provider,
+        )
+    except ValueError as error:
+        raise ApiError(
+            status_code=400,
+            code="invalid_price_sync_range",
+            message=str(error),
+        ) from error
+    except MarketDataProviderUnavailableError as error:
+        raise ApiError(
+            status_code=503,
+            code="market_data_provider_unavailable",
+            message=str(error),
+        ) from error
+    except (IngestionValidationError, MarketDataProviderError) as error:
+        raise ApiError(
+            status_code=502,
+            code="market_data_provider_error",
+            message="AShareHub could not synchronize the requested price history.",
+        ) from error
+
+    prices = list_prices(
+        session,
+        stock_id=stock.id,
+        from_date=request.from_date,
+        to_date=request.to_date,
+        limit=MAX_PRICE_LIMIT,
+    )
+    return StockPriceSyncResponse(
+        stock=StockReference.model_validate(stock),
+        items=[DailyPriceResponse.model_validate(price) for price in prices],
+        sync=StockPriceSyncMetadata(
+            requested_range=DateRangeResponse(
+                from_date=result.requested_range.start_date,
+                to_date=result.requested_range.end_date,
+            ),
+            effective_range=(
+                DateRangeResponse(
+                    from_date=result.effective_range.start_date,
+                    to_date=result.effective_range.end_date,
+                )
+                if result.effective_range
+                else None
+            ),
+            cache_hit=result.cache_hit,
+            fetched_ranges=[
+                DateRangeResponse(
+                    from_date=item.start_date,
+                    to_date=item.end_date,
+                )
+                for item in result.fetched_ranges
+            ],
+            prices_inserted=result.prices_inserted,
+            prices_updated=result.prices_updated,
+        ),
     )
 
 

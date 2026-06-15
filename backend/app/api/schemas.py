@@ -65,6 +65,29 @@ class StockPricesResponse(ApiModel):
     items: list[DailyPriceResponse]
 
 
+class StockPriceSyncRequest(ApiModel):
+    from_date: date
+    to_date: date
+
+
+class DateRangeResponse(ApiModel):
+    from_date: date
+    to_date: date
+
+
+class StockPriceSyncMetadata(ApiModel):
+    requested_range: DateRangeResponse
+    effective_range: DateRangeResponse | None
+    cache_hit: bool
+    fetched_ranges: list[DateRangeResponse]
+    prices_inserted: int
+    prices_updated: int
+
+
+class StockPriceSyncResponse(StockPricesResponse):
+    sync: StockPriceSyncMetadata
+
+
 class ScannerRunResponse(ApiModel):
     id: UUID
     status: str

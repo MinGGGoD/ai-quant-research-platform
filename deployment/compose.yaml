@@ -31,6 +31,9 @@ services:
       AQR_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-ai_quant}:${POSTGRES_PASSWORD:-local_development_only}@postgres:5432/${POSTGRES_DB:-ai_quant}
       AQR_DATABASE_ECHO: ${AQR_DATABASE_ECHO:-false}
       AQR_CORS_ORIGINS: '${AQR_CORS_ORIGINS:-["http://localhost:5173"]}'
+      AQR_ASHAREHUB_API_KEY: ${AQR_ASHAREHUB_API_KEY:-}
+      AQR_ASHAREHUB_TIMEOUT_SECONDS: ${AQR_ASHAREHUB_TIMEOUT_SECONDS:-20}
+      AQR_ASHAREHUB_SYNC_MAX_REQUESTS: ${AQR_ASHAREHUB_SYNC_MAX_REQUESTS:-20}
       AQR_AI_PROVIDER: ${AQR_AI_PROVIDER:-disabled}
       AQR_AI_BASE_URL: ${AQR_AI_BASE_URL:-https://api.openai.com/v1}
       AQR_AI_API_KEY: ${AQR_AI_API_KEY:-}

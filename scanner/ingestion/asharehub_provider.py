@@ -23,18 +23,16 @@ ASHAREHUB_SOURCE = "asharehub_raw"
 TS_CODE_PATTERN = re.compile(r"^\d{6}\.(SH|SZ|BJ)$")
 EXCHANGE_BY_SUFFIX = {"SH": "SSE", "SZ": "SZSE", "BJ": "BSE"}
 STATUS_MAP = {"L": "active", "P": "suspended", "D": "delisted"}
+SUFFIX_BY_EXCHANGE = {"SSE": "SH", "SZSE": "SZ", "BSE": "BJ"}
 
 
-class AShareHubMarketDataProvider:
-    """Load unadjusted Shanghai, Shenzhen, and Beijing daily data from AShareHub."""
+class AShareHubApiClient:
+    """Make bounded, paginated AShareHub requests."""
 
     def __init__(
         self,
         api_key: str,
-        start_date: date,
-        end_date: date,
         *,
-        ts_codes: tuple[str, ...] = (),
         page_size: int = 5000,
         max_requests: int = 20,
         timeout_seconds: float = 20.0,
@@ -43,28 +41,11 @@ class AShareHubMarketDataProvider:
         normalized_key = api_key.strip()
         if not normalized_key:
             raise ValueError("AShareHub API key is required")
-        if start_date > end_date:
-            raise ValueError("start_date cannot be later than end_date")
         if not 1 <= page_size <= 5000:
             raise ValueError("page_size must be between 1 and 5000")
         if max_requests < 1:
             raise ValueError("max_requests must be positive")
 
-        normalized_codes = tuple(code.strip().upper() for code in ts_codes)
-        invalid_codes = [
-            code for code in normalized_codes if TS_CODE_PATTERN.fullmatch(code) is None
-        ]
-        if invalid_codes:
-            raise ValueError(
-                "ts_codes must use six digits plus .SH, .SZ, or .BJ; "
-                "invalid values: " + ", ".join(invalid_codes)
-            )
-        if len(set(normalized_codes)) != len(normalized_codes):
-            raise ValueError("ts_codes cannot contain duplicates")
-
-        self.start_date = start_date
-        self.end_date = end_date
-        self.ts_codes = normalized_codes
         self.page_size = page_size
         self.max_requests = max_requests
         self._request_count = 0
@@ -75,75 +56,7 @@ class AShareHubMarketDataProvider:
             timeout=timeout_seconds,
         )
 
-    def load(self) -> MarketDataBatch:
-        try:
-            stock_payloads = self._load_stock_payloads()
-            price_payloads = self._load_price_payloads()
-        finally:
-            if self._owns_client:
-                self._client.close()
-
-        issues: list[ValidationIssue] = []
-        stocks = self._parse_stocks(stock_payloads, issues)
-        daily_prices = self._parse_prices(price_payloads, issues)
-        stock_keys = {stock.key for stock in stocks}
-        complete_daily_prices: list[DailyPriceRecord] = []
-        warnings: list[IngestionWarning] = []
-        for price in daily_prices:
-            if price.stock_key not in stock_keys:
-                warnings.append(
-                    IngestionWarning(
-                        code="unknown_stock",
-                        message=(
-                            "Skipped daily price because AShareHub did not return "
-                            "matching stock metadata"
-                        ),
-                        stock_key=f"{price.exchange}:{price.symbol}",
-                    )
-                )
-            else:
-                complete_daily_prices.append(price)
-
-        if issues:
-            raise IngestionValidationError(issues)
-
-        return MarketDataBatch(
-            stocks=tuple(stocks),
-            daily_prices=tuple(complete_daily_prices),
-            warnings=tuple(warnings),
-        )
-
-    def _load_stock_payloads(self) -> list[dict[str, Any]]:
-        if self.ts_codes:
-            payloads: list[dict[str, Any]] = []
-            for ts_code in self.ts_codes:
-                payloads.extend(
-                    self._get_all_pages(
-                        "/v1/reference/stocks",
-                        {"ts_code": ts_code},
-                    )
-                )
-            return payloads
-        return self._get_all_pages("/v1/reference/stocks", {})
-
-    def _load_price_payloads(self) -> list[dict[str, Any]]:
-        base_params = {
-            "start_date": self.start_date.isoformat(),
-            "end_date": self.end_date.isoformat(),
-        }
-        if self.ts_codes:
-            payloads: list[dict[str, Any]] = []
-            for ts_code in self.ts_codes:
-                payloads.extend(
-                    self._get_all_pages(
-                        "/v1/market/daily",
-                        {**base_params, "ts_code": ts_code},
-                    )
-                )
-            return payloads
-        return self._get_all_pages("/v1/market/daily", base_params)
-
-    def _get_all_pages(
+    def get_all_pages(
         self,
         path: str,
         params: Mapping[str, str],
@@ -203,6 +116,141 @@ class AShareHubMarketDataProvider:
             if len(page) < self.page_size:
                 return records
             offset += self.page_size
+
+    def close(self) -> None:
+        if self._owns_client:
+            self._client.close()
+
+
+class AShareHubMarketDataProvider:
+    """Load unadjusted Shanghai, Shenzhen, and Beijing daily data from AShareHub."""
+
+    def __init__(
+        self,
+        api_key: str,
+        start_date: date,
+        end_date: date,
+        *,
+        ts_codes: tuple[str, ...] = (),
+        known_stocks: tuple[StockRecord, ...] | None = None,
+        page_size: int = 5000,
+        max_requests: int = 20,
+        timeout_seconds: float = 20.0,
+        client: httpx.Client | None = None,
+        api_client: AShareHubApiClient | None = None,
+    ) -> None:
+        if start_date > end_date:
+            raise ValueError("start_date cannot be later than end_date")
+        if api_client is not None and client is not None:
+            raise ValueError("client and api_client cannot both be provided")
+
+        normalized_codes = tuple(code.strip().upper() for code in ts_codes)
+        invalid_codes = [
+            code for code in normalized_codes if TS_CODE_PATTERN.fullmatch(code) is None
+        ]
+        if invalid_codes:
+            raise ValueError(
+                "ts_codes must use six digits plus .SH, .SZ, or .BJ; "
+                "invalid values: " + ", ".join(invalid_codes)
+            )
+        if len(set(normalized_codes)) != len(normalized_codes):
+            raise ValueError("ts_codes cannot contain duplicates")
+        if known_stocks is not None and normalized_codes:
+            raise ValueError("known_stocks and ts_codes cannot both be provided")
+        known_codes = tuple(
+            f"{stock.symbol}.{SUFFIX_BY_EXCHANGE[stock.exchange]}"
+            for stock in known_stocks or ()
+            if stock.exchange in SUFFIX_BY_EXCHANGE
+        )
+        if known_stocks is not None and len(known_codes) != len(known_stocks):
+            raise ValueError("known stock exchange must be SSE, SZSE, or BSE")
+
+        self.start_date = start_date
+        self.end_date = end_date
+        self.ts_codes = normalized_codes or known_codes
+        self.known_stocks = known_stocks
+        self._owns_api_client = api_client is None
+        self._api_client = api_client or AShareHubApiClient(
+            api_key,
+            page_size=page_size,
+            max_requests=max_requests,
+            timeout_seconds=timeout_seconds,
+            client=client,
+        )
+
+    def load(self) -> MarketDataBatch:
+        try:
+            stock_payloads = (
+                [] if self.known_stocks is not None else self._load_stock_payloads()
+            )
+            price_payloads = self._load_price_payloads()
+        finally:
+            if self._owns_api_client:
+                self._api_client.close()
+
+        issues: list[ValidationIssue] = []
+        stocks = (
+            list(self.known_stocks)
+            if self.known_stocks is not None
+            else self._parse_stocks(stock_payloads, issues)
+        )
+        daily_prices = self._parse_prices(price_payloads, issues)
+        stock_keys = {stock.key for stock in stocks}
+        complete_daily_prices: list[DailyPriceRecord] = []
+        warnings: list[IngestionWarning] = []
+        for price in daily_prices:
+            if price.stock_key not in stock_keys:
+                warnings.append(
+                    IngestionWarning(
+                        code="unknown_stock",
+                        message=(
+                            "Skipped daily price because AShareHub did not return "
+                            "matching stock metadata"
+                        ),
+                        stock_key=f"{price.exchange}:{price.symbol}",
+                    )
+                )
+            else:
+                complete_daily_prices.append(price)
+
+        if issues:
+            raise IngestionValidationError(issues)
+
+        return MarketDataBatch(
+            stocks=tuple(stocks),
+            daily_prices=tuple(complete_daily_prices),
+            warnings=tuple(warnings),
+        )
+
+    def _load_stock_payloads(self) -> list[dict[str, Any]]:
+        if self.ts_codes:
+            payloads: list[dict[str, Any]] = []
+            for ts_code in self.ts_codes:
+                payloads.extend(
+                    self._api_client.get_all_pages(
+                        "/v1/reference/stocks",
+                        {"ts_code": ts_code},
+                    )
+                )
+            return payloads
+        return self._api_client.get_all_pages("/v1/reference/stocks", {})
+
+    def _load_price_payloads(self) -> list[dict[str, Any]]:
+        base_params = {
+            "start_date": self.start_date.isoformat(),
+            "end_date": self.end_date.isoformat(),
+        }
+        if self.ts_codes:
+            payloads: list[dict[str, Any]] = []
+            for ts_code in self.ts_codes:
+                payloads.extend(
+                    self._api_client.get_all_pages(
+                        "/v1/market/daily",
+                        {**base_params, "ts_code": ts_code},
+                    )
+                )
+            return payloads
+        return self._api_client.get_all_pages("/v1/market/daily", base_params)
 
     def _parse_stocks(
         self,
@@ -623,3 +671,96 @@ class AShareHubMarketDataProvider:
                 field=field,
             )
         )
+
+
+class AShareHubHistoryClient:
+    """Load trade sessions and stock history through one request budget."""
+
+    def __init__(
+        self,
+        api_key: str,
+        *,
+        page_size: int = 5000,
+        max_requests: int = 20,
+        timeout_seconds: float = 20.0,
+        client: httpx.Client | None = None,
+    ) -> None:
+        self._api_client = AShareHubApiClient(
+            api_key,
+            page_size=page_size,
+            max_requests=max_requests,
+            timeout_seconds=timeout_seconds,
+            client=client,
+        )
+
+    def load_open_dates(
+        self,
+        exchange: str,
+        start_date: date,
+        end_date: date,
+    ) -> tuple[date, ...]:
+        if start_date > end_date:
+            raise ValueError("start_date cannot be later than end_date")
+        normalized_exchange = exchange.strip().upper()
+        if normalized_exchange not in {"SSE", "SZSE"}:
+            raise ValueError("trade calendar exchange must be SSE or SZSE")
+
+        payloads = self._api_client.get_all_pages(
+            "/v1/reference/trade-calendar",
+            {
+                "exchange": normalized_exchange,
+                "start_date": start_date.isoformat(),
+                "end_date": end_date.isoformat(),
+                "is_open": "1",
+            },
+        )
+        issues: list[ValidationIssue] = []
+        sessions: set[date] = set()
+        for index, payload in enumerate(payloads, start=1):
+            value = payload.get("cal_date")
+            if not isinstance(value, str):
+                issues.append(
+                    ValidationIssue(
+                        code="invalid_date",
+                        message="cal_date must use YYYY-MM-DD format",
+                        file="asharehub:/v1/reference/trade-calendar",
+                        row=index,
+                        field="cal_date",
+                    )
+                )
+                continue
+            try:
+                sessions.add(date.fromisoformat(value))
+            except ValueError:
+                issues.append(
+                    ValidationIssue(
+                        code="invalid_date",
+                        message="cal_date must use YYYY-MM-DD format",
+                        file="asharehub:/v1/reference/trade-calendar",
+                        row=index,
+                        field="cal_date",
+                    )
+                )
+        if issues:
+            raise IngestionValidationError(issues)
+        return tuple(sorted(sessions))
+
+    def load_prices(
+        self,
+        stock: StockRecord,
+        start_date: date,
+        end_date: date,
+    ) -> MarketDataBatch:
+        if stock.exchange not in SUFFIX_BY_EXCHANGE:
+            raise ValueError("stock exchange must be SSE, SZSE, or BSE")
+        provider = AShareHubMarketDataProvider(
+            api_key="shared-client",
+            start_date=start_date,
+            end_date=end_date,
+            known_stocks=(stock,),
+            api_client=self._api_client,
+        )
+        return provider.load()
+
+    def close(self) -> None:
+        self._api_client.close()

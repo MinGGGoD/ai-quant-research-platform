@@ -5,9 +5,11 @@ import httpx
 import pytest
 
 from scanner.ingestion import (
+    AShareHubHistoryClient,
     AShareHubMarketDataProvider,
     IngestionValidationError,
     MarketDataProviderError,
+    StockRecord,
 )
 
 
@@ -94,6 +96,56 @@ def test_supports_beijing_exchange_codes() -> None:
 
     assert batch.stocks[0].exchange == "BSE"
     assert batch.daily_prices[0].exchange == "BSE"
+
+
+def test_history_client_uses_calendar_and_known_stock_metadata() -> None:
+    requested_paths: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requested_paths.append(request.url.path)
+        if request.url.path == "/v1/reference/trade-calendar":
+            assert request.url.params["exchange"] == "SZSE"
+            assert request.url.params["is_open"] == "1"
+            return httpx.Response(
+                200,
+                json=[
+                    {"exchange": "SZSE", "cal_date": "2026-06-11", "is_open": 1},
+                    {"exchange": "SZSE", "cal_date": "2026-06-12", "is_open": 1},
+                ],
+            )
+        if request.url.path == "/v1/market/daily":
+            assert request.url.params["ts_code"] == "000001.SZ"
+            return httpx.Response(200, json=[price_payload()])
+        raise AssertionError(f"Unexpected path: {request.url.path}")
+
+    history = AShareHubHistoryClient(
+        api_key="test-key",
+        client=make_client(httpx.MockTransport(handler)),
+    )
+    stock = StockRecord(
+        symbol="000001",
+        exchange="SZSE",
+        name="Ping An Bank",
+        list_date=date(1991, 4, 3),
+        delist_date=None,
+        status="active",
+    )
+
+    sessions = history.load_open_dates(
+        "SZSE",
+        date(2026, 6, 11),
+        date(2026, 6, 12),
+    )
+    batch = history.load_prices(
+        stock,
+        date(2026, 6, 12),
+        date(2026, 6, 12),
+    )
+
+    assert sessions == (date(2026, 6, 11), date(2026, 6, 12))
+    assert batch.stocks == (stock,)
+    assert batch.daily_prices[0].trade_date == date(2026, 6, 12)
+    assert "/v1/reference/stocks" not in requested_paths
 
 
 def test_skips_prices_without_stock_metadata_with_warning() -> None:

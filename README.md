@@ -29,6 +29,8 @@ research-document retrieval extensions:
 - Pydantic API responses, pagination, symbol lookup, and structured API errors.
 - Stock search and selection, SVG daily K-line and volume charts, stored
   technical signals, and recent scanner-run history.
+- Two-year default chart periods with user-triggered, trade-calendar-aware
+  incremental AShareHub synchronization and PostgreSQL caching.
 - Provider-neutral research-note generation from stored stock details, recent
   price summaries, and detected technical signals.
 - Persisted note provenance, model metadata, prompt versions, and source
@@ -223,6 +225,7 @@ The initial migration creates:
 
 - `stocks`
 - `daily_prices`
+- `daily_price_sync_ranges`
 - `scanner_runs`
 - `signal_definitions`
 - `technical_signals`
@@ -451,6 +454,13 @@ Get stock details and daily prices:
 ```powershell
 Invoke-RestMethod http://localhost:8000/api/v1/stocks/600519.SH
 Invoke-RestMethod "http://localhost:8000/api/v1/stocks/600519/prices?exchange=SSE&limit=250"
+```
+
+Synchronize only missing daily records for a bounded period:
+
+```powershell
+$body = '{"from_date":"2024-06-15","to_date":"2026-06-15"}'
+Invoke-RestMethod -Method Post -ContentType "application/json" -Body $body "http://localhost:8000/api/v1/stocks/600519/prices/sync?exchange=SSE"
 ```
 
 List scanner runs and detected signals:
@@ -690,7 +700,9 @@ Application settings use the `AQR_` environment prefix:
 - `AQR_DATABASE_URL`
 - `AQR_DATABASE_ECHO`
 - `AQR_CORS_ORIGINS`
-- `AQR_ASHAREHUB_API_KEY` (scanner only; secret, never commit)
+- `AQR_ASHAREHUB_API_KEY` (backend and scanner; secret, never commit)
+- `AQR_ASHAREHUB_TIMEOUT_SECONDS`
+- `AQR_ASHAREHUB_SYNC_MAX_REQUESTS`
 - `AQR_AI_PROVIDER` (`disabled` or `openai_compatible`)
 - `AQR_AI_BASE_URL`
 - `AQR_AI_API_KEY` (backend only; secret, never commit)

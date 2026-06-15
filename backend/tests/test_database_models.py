@@ -8,6 +8,7 @@ from sqlalchemy.schema import CreateTable
 from backend.app.database import (
     Base,
     DailyPrice,
+    DailyPriceSyncRange,
     DocumentChunk,
     KnowledgeDocument,
     ResearchNote,
@@ -20,6 +21,7 @@ from backend.app.database import (
 EXPECTED_TABLES = {
     "stocks",
     "daily_prices",
+    "daily_price_sync_ranges",
     "document_chunks",
     "knowledge_documents",
     "scanner_runs",
@@ -70,6 +72,7 @@ def test_documented_unique_constraints_are_present() -> None:
 
 def test_daily_price_and_scanner_constraints_are_present() -> None:
     daily_prices = Base.metadata.tables["daily_prices"]
+    sync_ranges = Base.metadata.tables["daily_price_sync_ranges"]
     scanner_runs = Base.metadata.tables["scanner_runs"]
 
     daily_checks = {
@@ -80,6 +83,11 @@ def test_daily_price_and_scanner_constraints_are_present() -> None:
     scanner_checks = {
         constraint.name
         for constraint in scanner_runs.constraints
+        if isinstance(constraint, CheckConstraint)
+    }
+    sync_range_checks = {
+        constraint.name
+        for constraint in sync_ranges.constraints
         if isinstance(constraint, CheckConstraint)
     }
 
@@ -93,6 +101,9 @@ def test_daily_price_and_scanner_constraints_are_present() -> None:
         "ck_scanner_runs_non_negative_counts",
         "ck_scanner_runs_valid_finished_at",
         "ck_scanner_runs_valid_status",
+    }
+    assert sync_range_checks == {
+        "ck_daily_price_sync_ranges_valid_date_range",
     }
 
 
@@ -162,6 +173,11 @@ def test_model_relationships_can_be_constructed() -> None:
         amount=Decimal("10250.0000"),
         source="synthetic_fixture",
     )
+    sync_range = DailyPriceSyncRange(
+        source="asharehub_raw",
+        start_date=date(2026, 6, 1),
+        end_date=date(2026, 6, 12),
+    )
     scanner_run = ScannerRun(
         status="completed",
         data_date=date(2026, 6, 12),
@@ -213,6 +229,7 @@ def test_model_relationships_can_be_constructed() -> None:
     )
 
     stock.daily_prices.append(price)
+    stock.price_sync_ranges.append(sync_range)
     stock.technical_signals.append(signal)
     scanner_run.technical_signals.append(signal)
     definition.technical_signals.append(signal)
@@ -222,6 +239,7 @@ def test_model_relationships_can_be_constructed() -> None:
     document.chunks.append(chunk)
 
     assert price.stock is stock
+    assert sync_range.stock is stock
     assert signal.stock is stock
     assert signal.scanner_run is scanner_run
     assert signal.signal_definition is definition

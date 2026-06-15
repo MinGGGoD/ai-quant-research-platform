@@ -26,6 +26,13 @@ def test_asharehub_api_key_is_masked_in_settings_repr() -> None:
     assert "test-secret" not in repr(settings)
 
 
+def test_asharehub_sync_defaults_are_bounded() -> None:
+    settings = Settings()
+
+    assert settings.asharehub_timeout_seconds == 20
+    assert settings.asharehub_sync_max_requests == 20
+
+
 def test_ai_provider_is_disabled_without_explicit_configuration() -> None:
     settings = Settings()
 

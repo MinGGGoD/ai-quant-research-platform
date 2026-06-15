@@ -1,6 +1,9 @@
 """Market data ingestion interfaces and implementations."""
 
-from scanner.ingestion.asharehub_provider import AShareHubMarketDataProvider
+from scanner.ingestion.asharehub_provider import (
+    AShareHubHistoryClient,
+    AShareHubMarketDataProvider,
+)
 from scanner.ingestion.csv_provider import CsvMarketDataProvider
 from scanner.ingestion.errors import (
     IngestionPersistenceError,
@@ -20,6 +23,7 @@ from scanner.ingestion.types import (
 
 __all__ = [
     "AShareHubMarketDataProvider",
+    "AShareHubHistoryClient",
     "CsvMarketDataProvider",
     "DailyPriceRecord",
     "IngestionPersistenceError",

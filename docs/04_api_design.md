@@ -89,6 +89,7 @@ framework-internal response details.
 | `GET` | `/api/v1/stocks` | List and filter stocks |
 | `GET` | `/api/v1/stocks/{symbol}` | Get one stock |
 | `GET` | `/api/v1/stocks/{symbol}/prices` | Get daily K-line data |
+| `POST` | `/api/v1/stocks/{symbol}/prices/sync` | Cache missing daily K-line data |
 | `GET` | `/api/v1/scanner-runs` | List scanner runs |
 | `GET` | `/api/v1/scanner-runs/{run_id}` | Get one scanner run |
 | `GET` | `/api/v1/signals` | List detected signals |
@@ -327,6 +328,28 @@ The values above are illustrative.
 - Display the data source and adjustment convention near the chart.
 - An empty `items` array means the stock exists but has no data in the requested
   period.
+
+#### 7.3 Synchronize Daily K-Line Data
+
+`POST /api/v1/stocks/{symbol}/prices/sync`
+
+The request body requires inclusive `from_date` and `to_date` values. The range
+must not exceed 1,096 days or extend beyond today. `exchange` is accepted as the
+same optional query parameter used by the read endpoint.
+
+The backend compares the requested period with stored prices, synchronization
+coverage, and the provider trade calendar. It fetches only missing trading
+session ranges, upserts them, stores completed historical coverage, and returns
+the full cached period. The response extends the normal price response with:
+
+- `cache_hit`: no missing provider price range was required.
+- `fetched_ranges`: inclusive ranges requested from AShareHub.
+- `prices_inserted` and `prices_updated`: persistence counts for this request.
+- `requested_range` and listing-date-clamped `effective_range`.
+
+Provider credentials remain server-side. Errors include `400` for an invalid
+range, `502` for an AShareHub failure, and `503` when synchronization is not
+configured.
 
 ### 8. List Scanner Runs
 

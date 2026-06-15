@@ -124,7 +124,26 @@ records therefore use shares and CNY regardless of provider.
 
 The values above are illustrative fixture data, not a market statement.
 
-### 5. Table: `signal_definitions`
+### 5. Table: `daily_price_sync_ranges`
+
+Stores historical date intervals that were checked against the AShareHub trade
+calendar for one stock. Coverage records prevent repeated provider calls for
+weekends, holidays, suspended sessions, and already cached prices.
+
+| Field | Type | Constraints | Description |
+|---|---|---|---|
+| `id` | `BIGINT` | Primary key, generated identity | Coverage identifier |
+| `stock_id` | `BIGINT` | Not null, foreign key | References `stocks.id` |
+| `source` | `VARCHAR(64)` | Not null | Provider identifier |
+| `start_date` | `DATE` | Not null | Inclusive checked date |
+| `end_date` | `DATE` | Not null | Inclusive checked date |
+| `created_at` | `TIMESTAMPTZ` | Not null | Coverage creation time |
+
+Ranges are merged when they overlap or are adjacent. `end_date` must not be
+earlier than `start_date`. An open current session remains refreshable until its
+daily bar is available; closed current dates may be cached immediately.
+
+### 6. Table: `signal_definitions`
 
 Stores the identity and version of each deterministic technical signal. Keeping
 definitions separate from matches allows historical runs to remain traceable
@@ -171,7 +190,7 @@ Each definition requires 21 bars including the evaluated date. Changing a
 calculation rule or parameter requires a new version rather than updating an
 existing definition in place.
 
-### 6. Table: `scanner_runs`
+### 7. Table: `scanner_runs`
 
 Stores the lifecycle, configuration, and summary of each CLI scanner execution.
 
@@ -224,7 +243,7 @@ Stores the lifecycle, configuration, and summary of each CLI scanner execution.
 | `warning_count` | `2` |
 | `error_count` | `0` |
 
-### 7. Table: `technical_signals`
+### 8. Table: `technical_signals`
 
 Stores positive signal matches produced by scanner runs. Valid non-matches are
 represented by run summary counts rather than one row per stock and rule.
@@ -281,7 +300,7 @@ explicitly supported. Normal application behavior should preserve scan history.
 This record describes a rule match for research inspection. It is not an action
 or recommendation.
 
-### 8. Table: `research_notes`
+### 9. Table: `research_notes`
 
 Phase 7 creates this table for traceable manual or AI-generated research
 summaries. It remains an optional extension to the Phase 1-6 MVP.
@@ -330,7 +349,7 @@ summaries. It remains an optional extension to the Phase 1-6 MVP.
 | `model_name` | `openai-compatible-model` |
 | `prompt_version` | `research-summary-v1` |
 
-### 9. Table: `knowledge_documents`
+### 10. Table: `knowledge_documents`
 
 Phase 8 stores provenance and ingestion metadata for user-supplied local
 documents. The application accepts approved text, Markdown, and text-based PDF
@@ -390,7 +409,7 @@ files; it does not download or scrape paid research.
 | `embedding_dimensions` | `256` |
 | `metadata` | `{"ingestion": "local_upload", "rights_confirmed": true}` |
 
-### 10. Table: `document_chunks`
+### 11. Table: `document_chunks`
 
 Stores normalized document segments and their vectors. Chunk text is retained
 so every search result can include a stable citation and inspectable evidence.

@@ -9,15 +9,19 @@ import httpx
 import pytest
 from alembic import command
 from alembic.config import Config
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, select, text
 from sqlalchemy.engine import Engine, make_url
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 
 from ai import GeneratedResearchNote, ResearchNoteContext
-from backend.app.api.routes import configured_research_note_generator
+from backend.app.api.routes import (
+    configured_market_data_history_provider,
+    configured_research_note_generator,
+)
 from backend.app.database import (
     DailyPrice,
+    DailyPriceSyncRange,
     ResearchNote,
     ScannerRun,
     SignalDefinition,
@@ -26,6 +30,7 @@ from backend.app.database import (
 )
 from backend.app.database.session import get_db_session
 from backend.app.main import app
+from scanner.ingestion import DailyPriceRecord, MarketDataBatch, StockRecord
 
 RUN_ID = UUID("c62d4313-9199-4f27-a8f7-c64284e78792")
 SIGNAL_ID = UUID("9a694b1c-255b-4708-b47b-f0e35b2ad1f0")
@@ -57,6 +62,53 @@ class UnsafeResearchNoteGenerator:
             content="The reader should buy this stock.",
             model_name="synthetic-model",
         )
+
+
+class FakeMarketDataHistoryProvider:
+    def __init__(self) -> None:
+        self.calendar_calls: list[tuple[str, date, date]] = []
+        self.price_calls: list[tuple[str, date, date]] = []
+
+    def reset(self) -> None:
+        self.calendar_calls.clear()
+        self.price_calls.clear()
+
+    def load_open_dates(
+        self,
+        exchange: str,
+        start_date: date,
+        end_date: date,
+    ) -> tuple[date, ...]:
+        self.calendar_calls.append((exchange, start_date, end_date))
+        return (date(2026, 6, 10), date(2026, 6, 11), date(2026, 6, 12))
+
+    def load_prices(
+        self,
+        stock: StockRecord,
+        start_date: date,
+        end_date: date,
+    ) -> MarketDataBatch:
+        self.price_calls.append((stock.symbol, start_date, end_date))
+        return MarketDataBatch(
+            stocks=(stock,),
+            daily_prices=(
+                DailyPriceRecord(
+                    symbol=stock.symbol,
+                    exchange=stock.exchange,
+                    trade_date=date(2026, 6, 10),
+                    open=Decimal("9.8000"),
+                    high=Decimal("10.1000"),
+                    low=Decimal("9.7000"),
+                    close=Decimal("10.0000"),
+                    volume=900,
+                    amount=Decimal("9000.0000"),
+                    source="asharehub_raw",
+                ),
+            ),
+        )
+
+
+fake_market_data_provider = FakeMarketDataHistoryProvider()
 
 
 @pytest.fixture(scope="module")
@@ -96,8 +148,9 @@ def api_session_factory(
     with migrated_engine.begin() as connection:
         connection.execute(
             text(
-                "TRUNCATE TABLE research_notes, technical_signals, daily_prices, "
-                "scanner_runs, signal_definitions, stocks "
+                "TRUNCATE TABLE research_notes, technical_signals, "
+                "daily_price_sync_ranges, daily_prices, scanner_runs, "
+                "signal_definitions, stocks "
                 "RESTART IDENTITY CASCADE"
             )
         )
@@ -197,11 +250,15 @@ def api_session_factory(
     app.dependency_overrides[configured_research_note_generator] = (
         FakeResearchNoteGenerator
     )
+    app.dependency_overrides[configured_market_data_history_provider] = lambda: (
+        fake_market_data_provider
+    )
     try:
         yield session_factory
     finally:
         app.dependency_overrides.pop(get_db_session, None)
         app.dependency_overrides.pop(configured_research_note_generator, None)
+        app.dependency_overrides.pop(configured_market_data_history_provider, None)
 
 
 async def api_request(
@@ -477,3 +534,83 @@ def test_research_note_requires_stored_price_context(
 
     assert response.status_code == 409
     assert response.json()["error"]["code"] == "insufficient_research_context"
+
+
+@pytest.mark.postgres
+def test_price_sync_fetches_only_missing_sessions_and_caches_coverage(
+    api_session_factory: sessionmaker[Session],
+) -> None:
+    fake_market_data_provider.reset()
+
+    first = post(
+        "/api/v1/stocks/600519/prices/sync",
+        params={"exchange": "SSE"},
+        json={
+            "from_date": "2026-06-10",
+            "to_date": "2026-06-12",
+        },
+    )
+    second = post(
+        "/api/v1/stocks/600519/prices/sync",
+        params={"exchange": "SSE"},
+        json={
+            "from_date": "2026-06-10",
+            "to_date": "2026-06-12",
+        },
+    )
+    app.dependency_overrides[configured_market_data_history_provider] = lambda: None
+    try:
+        cached_without_provider = post(
+            "/api/v1/stocks/600519/prices/sync",
+            params={"exchange": "SSE"},
+            json={
+                "from_date": "2026-06-10",
+                "to_date": "2026-06-12",
+            },
+        )
+    finally:
+        app.dependency_overrides[configured_market_data_history_provider] = lambda: (
+            fake_market_data_provider
+        )
+
+    assert first.status_code == 200
+    assert first.json()["sync"] == {
+        "requested_range": {
+            "from_date": "2026-06-10",
+            "to_date": "2026-06-12",
+        },
+        "effective_range": {
+            "from_date": "2026-06-10",
+            "to_date": "2026-06-12",
+        },
+        "cache_hit": False,
+        "fetched_ranges": [
+            {
+                "from_date": "2026-06-10",
+                "to_date": "2026-06-10",
+            }
+        ],
+        "prices_inserted": 1,
+        "prices_updated": 0,
+    }
+    assert [item["trade_date"] for item in first.json()["items"]] == [
+        "2026-06-10",
+        "2026-06-11",
+        "2026-06-12",
+    ]
+    assert second.status_code == 200
+    assert second.json()["sync"]["cache_hit"] is True
+    assert second.json()["sync"]["fetched_ranges"] == []
+    assert cached_without_provider.status_code == 200
+    assert cached_without_provider.json()["sync"]["cache_hit"] is True
+    assert fake_market_data_provider.calendar_calls == [
+        ("SSE", date(2026, 6, 10), date(2026, 6, 12))
+    ]
+    assert fake_market_data_provider.price_calls == [
+        ("600519", date(2026, 6, 10), date(2026, 6, 10))
+    ]
+
+    with api_session_factory() as session:
+        coverage = session.scalars(select(DailyPriceSyncRange)).one()
+        assert coverage.start_date == date(2026, 6, 10)
+        assert coverage.end_date == date(2026, 6, 12)

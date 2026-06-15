@@ -3,6 +3,7 @@
 from backend.app.database.base import Base
 from backend.app.database.models import (
     DailyPrice,
+    DailyPriceSyncRange,
     DocumentChunk,
     KnowledgeDocument,
     ResearchNote,
@@ -21,6 +22,7 @@ from backend.app.database.session import (
 __all__ = [
     "Base",
     "DailyPrice",
+    "DailyPriceSyncRange",
     "DocumentChunk",
     "KnowledgeDocument",
     "ResearchNote",

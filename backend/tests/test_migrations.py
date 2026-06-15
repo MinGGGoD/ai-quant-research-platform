@@ -8,10 +8,10 @@ def make_alembic_config() -> Config:
     return Config("alembic.ini")
 
 
-def test_rag_migration_is_the_only_head() -> None:
+def test_price_sync_migration_is_the_only_head() -> None:
     scripts = ScriptDirectory.from_config(make_alembic_config())
 
-    assert scripts.get_heads() == ["20260613_0003"]
+    assert scripts.get_heads() == ["20260615_0004"]
 
 
 def test_initial_migration_generates_postgresql_sql(
@@ -24,6 +24,7 @@ def test_initial_migration_generates_postgresql_sql(
     sql = capsys.readouterr().out
     assert "CREATE TABLE stocks" in sql
     assert "CREATE TABLE daily_prices" in sql
+    assert "CREATE TABLE daily_price_sync_ranges" in sql
     assert "CREATE TABLE scanner_runs" in sql
     assert "CREATE TABLE signal_definitions" in sql
     assert "CREATE TABLE technical_signals" in sql
@@ -69,6 +70,16 @@ def test_rag_migration_generates_downgrade_sql(
     sql = capsys.readouterr().out
     assert "DROP TABLE document_chunks" in sql
     assert "DROP TABLE knowledge_documents" in sql
+
+
+def test_price_sync_migration_generates_downgrade_sql(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    config = Config("alembic.ini")
+
+    command.downgrade(config, "20260615_0004:20260613_0003", sql=True)
+
+    assert "DROP TABLE daily_price_sync_ranges" in capsys.readouterr().out
 
 
 def test_alembic_accepts_percent_encoded_database_url(

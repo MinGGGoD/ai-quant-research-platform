@@ -109,12 +109,17 @@ explanations are neutral research descriptions and contain no action guidance.
 
 #### Dashboard Read Flow
 
-1. The browser requests scan runs, results, stock details, or chart data from the
-   FastAPI backend.
-2. The backend validates query parameters and reads the required records from
-   PostgreSQL.
-3. The backend returns stable JSON response models.
-4. The frontend renders scan status, filters, signal details, and historical
+1. The browser requests scan runs, results, stock details, or cached chart data
+   from the FastAPI backend.
+2. A stock search submits a bounded date range, defaulting to the past two
+   years, to the price synchronization endpoint.
+3. The backend checks persisted synchronization coverage, the provider trade
+   calendar, and existing daily prices to identify missing trading sessions.
+4. Only missing session ranges are requested from AShareHub and transactionally
+   upserted. Confirmed historical coverage is cached so suspended and closed
+   sessions are not repeatedly requested; the current day remains refreshable.
+5. The backend returns stable JSON response models and synchronization metadata.
+6. The frontend renders scan status, filters, signal details, and historical
    stock charts.
 
 The chart requests a bounded daily history and performs presentation-only
@@ -125,8 +130,9 @@ opened stocks are stored in browser local storage as navigation shortcuts.
 Intraday levels are not offered because the database and provider contract
 currently store daily bars only.
 
-The database is the integration point between the scanner and backend in the
-MVP. They do not call each other directly.
+The database remains the integration point between the scanner and backend.
+The backend reuses the scanner's validated AShareHub adapter for explicit
+user-triggered history synchronization; it does not invoke scanner jobs.
 
 #### Research Note Generation Flow
 

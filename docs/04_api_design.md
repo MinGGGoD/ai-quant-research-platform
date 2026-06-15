@@ -340,16 +340,18 @@ same optional query parameter used by the read endpoint.
 The backend compares the requested period with stored prices, synchronization
 coverage, and the provider trade calendar. It fetches only missing trading
 session ranges, upserts them, stores completed historical coverage, and returns
-the full cached period. The response extends the normal price response with:
+the full cached period. In `auto` mode it uses AShareHub when configured and
+otherwise falls back to BaoStock for SSE/SZSE. The response extends the normal
+price response with:
 
 - `cache_hit`: no missing provider price range was required.
-- `fetched_ranges`: inclusive ranges requested from AShareHub.
+- `fetched_ranges`: inclusive ranges requested from the configured provider.
 - `prices_inserted` and `prices_updated`: persistence counts for this request.
 - `requested_range` and listing-date-clamped `effective_range`.
 
 Provider credentials remain server-side. Errors include `400` for an invalid
-range, `502` for an AShareHub failure, and `503` when synchronization is not
-configured.
+range, `502` for a provider failure, and `503` when no configured provider
+supports the requested exchange.
 
 ### 8. List Scanner Runs
 

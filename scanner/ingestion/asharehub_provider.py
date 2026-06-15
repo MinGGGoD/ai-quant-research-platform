@@ -676,6 +676,9 @@ class AShareHubMarketDataProvider:
 class AShareHubHistoryClient:
     """Load trade sessions and stock history through one request budget."""
 
+    source = ASHAREHUB_SOURCE
+    supported_exchanges = frozenset({"SSE", "SZSE", "BSE"})
+
     def __init__(
         self,
         api_key: str,

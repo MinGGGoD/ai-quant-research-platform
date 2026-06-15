@@ -93,6 +93,7 @@ from rag import (
 )
 from scanner.ingestion import (
     AShareHubHistoryClient,
+    BaoStockHistoryClient,
     IngestionValidationError,
     MarketDataProviderError,
 )
@@ -195,7 +196,7 @@ EmbeddingProviderDependency = Annotated[
 
 
 def configured_market_data_history_provider() -> Iterator[
-    AShareHubHistoryClient | None
+    AShareHubHistoryClient | BaoStockHistoryClient | None
 ]:
     settings = get_settings()
     api_key = (
@@ -203,18 +204,27 @@ def configured_market_data_history_provider() -> Iterator[
         if settings.asharehub_api_key is not None
         else ""
     )
+    if settings.market_data_provider == "baostock" or (
+        settings.market_data_provider == "auto" and not api_key
+    ):
+        baostock_provider = BaoStockHistoryClient()
+        try:
+            yield baostock_provider
+        finally:
+            baostock_provider.close()
+        return
     if not api_key:
         yield None
         return
-    provider = AShareHubHistoryClient(
+    asharehub_provider = AShareHubHistoryClient(
         api_key,
         max_requests=settings.asharehub_sync_max_requests,
         timeout_seconds=settings.asharehub_timeout_seconds,
     )
     try:
-        yield provider
+        yield asharehub_provider
     finally:
-        provider.close()
+        asharehub_provider.close()
 
 
 MarketDataHistoryProviderDependency = Annotated[
@@ -491,7 +501,10 @@ def sync_stock_prices(
         raise ApiError(
             status_code=502,
             code="market_data_provider_error",
-            message="AShareHub could not synchronize the requested price history.",
+            message=(
+                "The configured market-data provider could not synchronize "
+                "the requested price history."
+            ),
         ) from error
 
     prices = list_prices(

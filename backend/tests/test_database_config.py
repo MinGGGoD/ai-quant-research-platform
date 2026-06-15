@@ -31,6 +31,7 @@ def test_asharehub_sync_defaults_are_bounded() -> None:
 
     assert settings.asharehub_timeout_seconds == 20
     assert settings.asharehub_sync_max_requests == 20
+    assert settings.market_data_provider == "auto"
 
 
 def test_ai_provider_is_disabled_without_explicit_configuration() -> None:

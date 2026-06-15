@@ -4,6 +4,7 @@ from scanner.ingestion.asharehub_provider import (
     AShareHubHistoryClient,
     AShareHubMarketDataProvider,
 )
+from scanner.ingestion.baostock_provider import BaoStockHistoryClient
 from scanner.ingestion.csv_provider import CsvMarketDataProvider
 from scanner.ingestion.errors import (
     IngestionPersistenceError,
@@ -24,6 +25,7 @@ from scanner.ingestion.types import (
 __all__ = [
     "AShareHubMarketDataProvider",
     "AShareHubHistoryClient",
+    "BaoStockHistoryClient",
     "CsvMarketDataProvider",
     "DailyPriceRecord",
     "IngestionPersistenceError",

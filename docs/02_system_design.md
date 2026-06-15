@@ -115,9 +115,11 @@ explanations are neutral research descriptions and contain no action guidance.
    years, to the price synchronization endpoint.
 3. The backend checks persisted synchronization coverage, the provider trade
    calendar, and existing daily prices to identify missing trading sessions.
-4. Only missing session ranges are requested from AShareHub and transactionally
-   upserted. Confirmed historical coverage is cached so suspended and closed
-   sessions are not repeatedly requested; the current day remains refreshable.
+4. Only missing session ranges are requested from the configured provider and
+   transactionally upserted. `auto` mode prefers AShareHub when its key is
+   configured and otherwise uses BaoStock for SSE/SZSE. Confirmed historical
+   coverage is cached so suspended and closed sessions are not repeatedly
+   requested; the current day remains refreshable.
 5. The backend returns stable JSON response models and synchronization metadata.
 6. The frontend renders scan status, filters, signal details, and historical
    stock charts.
@@ -131,8 +133,10 @@ Intraday levels are not offered because the database and provider contract
 currently store daily bars only.
 
 The database remains the integration point between the scanner and backend.
-The backend reuses the scanner's validated AShareHub adapter for explicit
-user-triggered history synchronization; it does not invoke scanner jobs.
+The backend reuses validated market-data adapters for explicit user-triggered
+history synchronization; it does not invoke scanner jobs. BaoStock is a
+credential-free fallback for SSE and SZSE only, while BSE synchronization uses
+AShareHub.
 
 #### Research Note Generation Flow
 

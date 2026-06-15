@@ -83,6 +83,10 @@ normalizes provider units before persistence: volume is converted from lots to
 shares and amount from CNY thousands to CNY. All persisted `daily_prices`
 records therefore use shares and CNY regardless of provider.
 
+The `baostock_raw` source contains unadjusted BaoStock SSE/SZSE prices. BaoStock
+already reports volume in shares and amount in CNY, so those units are
+persisted directly.
+
 | Field | Type | Constraints | Description |
 |---|---|---|---|
 | `id` | `BIGINT` | Primary key, generated identity | Internal row identifier |

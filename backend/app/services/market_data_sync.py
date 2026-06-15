@@ -6,7 +6,6 @@ from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from backend.app.database import DailyPrice, DailyPriceSyncRange, Stock
-from scanner.ingestion.asharehub_provider import ASHAREHUB_SOURCE
 from scanner.ingestion.repository import PersistenceStats, upsert_market_data
 from scanner.ingestion.types import MarketDataBatch, StockRecord
 
@@ -16,6 +15,9 @@ CALENDAR_EXCHANGE = {"SSE": "SSE", "SZSE": "SZSE", "BSE": "SSE"}
 
 
 class MarketDataHistoryProvider(Protocol):
+    source: str
+    supported_exchanges: frozenset[str]
+
     def load_open_dates(
         self,
         exchange: str,
@@ -153,7 +155,11 @@ def sync_stock_price_history(
         )
     if provider is None:
         raise MarketDataProviderUnavailableError(
-            "AShareHub price synchronization is not configured."
+            "Price synchronization is not configured."
+        )
+    if stock.exchange not in provider.supported_exchanges:
+        raise MarketDataProviderUnavailableError(
+            f"The configured market-data provider does not support {stock.exchange}."
         )
 
     open_dates = provider.load_open_dates(
@@ -222,6 +228,7 @@ def sync_stock_price_history(
             _store_merged_coverage(
                 session,
                 stock_id=stock.id,
+                source=provider.source,
                 start_date=effective_start,
                 end_date=completed_end,
             )
@@ -250,7 +257,6 @@ def _coverage_ranges(
     rows = session.execute(
         select(DailyPriceSyncRange.start_date, DailyPriceSyncRange.end_date).where(
             DailyPriceSyncRange.stock_id == stock_id,
-            DailyPriceSyncRange.source == ASHAREHUB_SOURCE,
             DailyPriceSyncRange.end_date >= start_date,
             DailyPriceSyncRange.start_date <= end_date,
         )
@@ -262,6 +268,7 @@ def _store_merged_coverage(
     session: Session,
     *,
     stock_id: int,
+    source: str,
     start_date: date,
     end_date: date,
 ) -> None:
@@ -274,7 +281,7 @@ def _store_merged_coverage(
             DailyPriceSyncRange.end_date,
         ).where(
             DailyPriceSyncRange.stock_id == stock_id,
-            DailyPriceSyncRange.source == ASHAREHUB_SOURCE,
+            DailyPriceSyncRange.source == source,
             DailyPriceSyncRange.end_date >= adjacent_start,
             DailyPriceSyncRange.start_date <= adjacent_end,
         )
@@ -291,7 +298,7 @@ def _store_merged_coverage(
     session.add(
         DailyPriceSyncRange(
             stock_id=stock_id,
-            source=ASHAREHUB_SOURCE,
+            source=source,
             start_date=start_date,
             end_date=end_date,
         )

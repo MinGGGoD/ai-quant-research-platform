@@ -11,6 +11,8 @@ zoomed. The stock search keeps up to six recently opened search results in local
 browser storage for quick access. A start/end date picker defaults to the past
 two years. Submitting a search or actively selecting a stock asks the backend to
 cache only missing trading sessions for that period before rendering the chart.
+The backend's default `auto` provider mode uses BaoStock for SSE/SZSE when an
+AShareHub key is not configured, so local searches do not require credentials.
 
 Weekly and monthly bars are derived from stored daily records. The frontend does
 not invent intraday bars, and minute-level intervals remain unavailable until a

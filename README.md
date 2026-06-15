@@ -30,7 +30,8 @@ research-document retrieval extensions:
 - Stock search and selection, SVG daily K-line and volume charts, stored
   technical signals, and recent scanner-run history.
 - Two-year default chart periods with user-triggered, trade-calendar-aware
-  incremental AShareHub synchronization and PostgreSQL caching.
+  incremental synchronization and PostgreSQL caching. AShareHub is preferred
+  when configured; BaoStock is the credential-free SSE/SZSE fallback.
 - Provider-neutral research-note generation from stored stock details, recent
   price summaries, and detected technical signals.
 - Persisted note provenance, model metadata, prompt versions, and source
@@ -278,6 +279,13 @@ The command:
 AShareHub currently documents a free-plan allowance of 100 requests per day.
 Check its current pricing and data-use terms before production or redistribution
 use. A `429` response is reported without retrying or partially importing data.
+
+The dashboard backend uses `AQR_MARKET_DATA_PROVIDER=auto` by default. It
+selects AShareHub when `AQR_ASHAREHUB_API_KEY` is configured and otherwise uses
+BaoStock for SSE and SZSE history. BSE synchronization still requires
+AShareHub; cached BSE records remain readable without a key. Set the provider
+explicitly to `asharehub` or `baostock` when deterministic provider selection is
+required.
 
 Run the provider through Docker Compose:
 
@@ -703,6 +711,7 @@ Application settings use the `AQR_` environment prefix:
 - `AQR_ASHAREHUB_API_KEY` (backend and scanner; secret, never commit)
 - `AQR_ASHAREHUB_TIMEOUT_SECONDS`
 - `AQR_ASHAREHUB_SYNC_MAX_REQUESTS`
+- `AQR_MARKET_DATA_PROVIDER` (`auto`, `asharehub`, or `baostock`)
 - `AQR_AI_PROVIDER` (`disabled` or `openai_compatible`)
 - `AQR_AI_BASE_URL`
 - `AQR_AI_API_KEY` (backend only; secret, never commit)

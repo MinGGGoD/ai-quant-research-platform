@@ -65,6 +65,9 @@ class UnsafeResearchNoteGenerator:
 
 
 class FakeMarketDataHistoryProvider:
+    source = "asharehub_raw"
+    supported_exchanges = frozenset({"SSE", "SZSE", "BSE"})
+
     def __init__(self) -> None:
         self.calendar_calls: list[tuple[str, date, date]] = []
         self.price_calls: list[tuple[str, date, date]] = []

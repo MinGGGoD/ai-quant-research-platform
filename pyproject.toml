@@ -10,10 +10,14 @@ readme = "README.md"
 requires-python = ">=3.11,<3.14"
 dependencies = [
     "alembic>=1.15,<2.0",
+    "baostock>=0.9.2,<1.0",
     "fastapi>=0.115,<1.0",
     "httpx>=0.28,<1.0",
+    "pgvector>=0.4,<1.0",
     "psycopg[binary]>=3.2,<4.0",
     "pydantic-settings>=2.7,<3.0",
+    "pypdf>=6.0,<7.0",
+    "python-multipart>=0.0.20,<1.0",
     "sqlalchemy>=2.0,<3.0",
     "uvicorn[standard]>=0.34,<1.0",
 ]
@@ -31,7 +35,7 @@ quant-scanner = "scanner.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["backend*", "scanner*"]
+include = ["ai*", "backend*", "rag*", "scanner*"]
 
 [tool.pytest.ini_options]
 addopts = "-ra"
@@ -50,11 +54,11 @@ select = ["B", "E", "F", "I", "UP"]
 [tool.mypy]
 python_version = "3.11"
 strict = true
-files = ["backend", "scanner"]
+files = ["ai", "backend", "rag", "scanner"]
 
 [tool.coverage.run]
 branch = true
-source = ["backend", "scanner"]
+source = ["ai", "backend", "rag", "scanner"]
 
 [tool.coverage.report]
 show_missing = true

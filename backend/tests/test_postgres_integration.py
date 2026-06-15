@@ -13,6 +13,9 @@ from sqlalchemy.orm import Session
 
 from backend.app.database import (
     DailyPrice,
+    DocumentChunk,
+    KnowledgeDocument,
+    ResearchNote,
     ScannerRun,
     SignalDefinition,
     Stock,
@@ -23,7 +26,10 @@ EXPECTED_TABLES = {
     "alembic_version",
     "stocks",
     "daily_prices",
+    "document_chunks",
+    "knowledge_documents",
     "scanner_runs",
+    "research_notes",
     "signal_definitions",
     "technical_signals",
 }
@@ -104,17 +110,55 @@ def test_model_persistence_unique_constraints_and_rollback(
             matched_values={"ma_5": 10.2, "ma_20": 10.1},
             explanation="Synthetic research signal.",
         )
+        note = ResearchNote(
+            title="Synthetic research observations",
+            content="Neutral observations from deterministic fixtures.",
+            source_type="ai_generated",
+            model_name="synthetic-model",
+            prompt_version="research-note-v1",
+            generation_metadata={"fixture": True},
+        )
+        document = KnowledgeDocument(
+            document_type="research_note",
+            title="Synthetic indexed note",
+            source_name="note.txt",
+            mime_type="text/plain",
+            content_sha256="c" * 64,
+            byte_size=64,
+            character_count=64,
+            embedding_model="local-hash-v1",
+            embedding_dimensions=256,
+            source_metadata={"fixture": True},
+        )
+        document.chunks.append(
+            DocumentChunk(
+                chunk_index=0,
+                content="Synthetic indexed research observations.",
+                content_sha256="d" * 64,
+                start_character=0,
+                end_character=40,
+                character_count=40,
+                embedding=[0.0] * 255 + [1.0],
+                chunk_metadata={},
+            )
+        )
 
         stock.daily_prices.append(price)
         stock.technical_signals.append(signal)
         scanner_run.technical_signals.append(signal)
         definition.technical_signals.append(signal)
+        stock.research_notes.append(note)
+        scanner_run.research_notes.append(note)
+        stock.knowledge_documents.append(document)
         session.add_all([stock, scanner_run, definition])
         session.commit()
 
         assert session.scalar(select(func.count()).select_from(Stock)) == 1
         assert session.scalar(select(func.count()).select_from(DailyPrice)) == 1
         assert session.scalar(select(func.count()).select_from(TechnicalSignal)) == 1
+        assert session.scalar(select(func.count()).select_from(ResearchNote)) == 1
+        assert session.scalar(select(func.count()).select_from(KnowledgeDocument)) == 1
+        assert session.scalar(select(func.count()).select_from(DocumentChunk)) == 1
 
         session.add(
             DailyPrice(

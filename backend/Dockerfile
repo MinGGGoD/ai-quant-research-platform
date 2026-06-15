@@ -6,7 +6,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 
 COPY pyproject.toml README.md requirements.lock alembic.ini ./
+COPY ai ./ai
 COPY backend ./backend
+COPY rag ./rag
 COPY scanner ./scanner
 
 RUN pip install --no-cache-dir -r requirements.lock \

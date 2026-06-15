@@ -3,6 +3,9 @@
 from backend.app.database.base import Base
 from backend.app.database.models import (
     DailyPrice,
+    DocumentChunk,
+    KnowledgeDocument,
+    ResearchNote,
     ScannerRun,
     SignalDefinition,
     Stock,
@@ -18,6 +21,9 @@ from backend.app.database.session import (
 __all__ = [
     "Base",
     "DailyPrice",
+    "DocumentChunk",
+    "KnowledgeDocument",
+    "ResearchNote",
     "ScannerRun",
     "SessionLocal",
     "SignalDefinition",

@@ -5,6 +5,7 @@ from decimal import Decimal
 from typing import Any
 from uuid import UUID, uuid4
 
+from pgvector.sqlalchemy import VECTOR  # type: ignore[import-untyped]
 from sqlalchemy import (
     BigInteger,
     Boolean,
@@ -28,6 +29,7 @@ from sqlalchemy.dialects.postgresql import UUID as PostgreSQLUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from backend.app.database.base import Base
+from rag import EMBEDDING_DIMENSIONS
 
 
 class TimestampMixin:
@@ -81,6 +83,14 @@ class Stock(TimestampMixin, Base):
         passive_deletes=True,
     )
     technical_signals: Mapped[list[TechnicalSignal]] = relationship(
+        back_populates="stock",
+        passive_deletes=True,
+    )
+    research_notes: Mapped[list[ResearchNote]] = relationship(
+        back_populates="stock",
+        passive_deletes=True,
+    )
+    knowledge_documents: Mapped[list[KnowledgeDocument]] = relationship(
         back_populates="stock",
         passive_deletes=True,
     )
@@ -214,6 +224,10 @@ class ScannerRun(TimestampMixin, Base):
         cascade="all, delete-orphan",
         passive_deletes=True,
     )
+    research_notes: Mapped[list[ResearchNote]] = relationship(
+        back_populates="scanner_run",
+        passive_deletes=True,
+    )
 
 
 class SignalDefinition(TimestampMixin, Base):
@@ -311,3 +325,194 @@ class TechnicalSignal(TimestampMixin, Base):
     signal_definition: Mapped[SignalDefinition] = relationship(
         back_populates="technical_signals"
     )
+
+
+class ResearchNote(TimestampMixin, Base):
+    __tablename__ = "research_notes"
+    __table_args__ = (
+        CheckConstraint(
+            "source_type IN ('manual', 'ai_generated')",
+            name="valid_source_type",
+        ),
+        CheckConstraint(
+            "stock_id IS NOT NULL OR scanner_run_id IS NOT NULL",
+            name="has_context_reference",
+        ),
+        CheckConstraint(
+            "source_type <> 'ai_generated' "
+            "OR (model_name IS NOT NULL AND prompt_version IS NOT NULL)",
+            name="generated_metadata_present",
+        ),
+        Index(
+            "ix_research_notes_stock_id_created_at_desc",
+            "stock_id",
+            desc("created_at"),
+        ),
+        Index(
+            "ix_research_notes_scanner_run_id_created_at_desc",
+            "scanner_run_id",
+            desc("created_at"),
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        PostgreSQLUUID(as_uuid=True),
+        primary_key=True,
+        default=uuid4,
+    )
+    stock_id: Mapped[int | None] = mapped_column(
+        BigInteger,
+        ForeignKey("stocks.id", ondelete="RESTRICT"),
+    )
+    scanner_run_id: Mapped[UUID | None] = mapped_column(
+        PostgreSQLUUID(as_uuid=True),
+        ForeignKey("scanner_runs.id", ondelete="RESTRICT"),
+    )
+    title: Mapped[str] = mapped_column(String(256), nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    source_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    model_name: Mapped[str | None] = mapped_column(String(128))
+    prompt_version: Mapped[str | None] = mapped_column(String(64))
+    generation_metadata: Mapped[dict[str, Any]] = mapped_column(
+        "metadata",
+        JSONB,
+        nullable=False,
+        default=dict,
+        server_default=text("'{}'::jsonb"),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    stock: Mapped[Stock | None] = relationship(back_populates="research_notes")
+    scanner_run: Mapped[ScannerRun | None] = relationship(
+        back_populates="research_notes"
+    )
+
+
+class KnowledgeDocument(TimestampMixin, Base):
+    __tablename__ = "knowledge_documents"
+    __table_args__ = (
+        CheckConstraint(
+            "document_type IN ("
+            "'company_announcement', 'annual_report', 'research_note', 'other'"
+            ")",
+            name="valid_document_type",
+        ),
+        CheckConstraint("byte_size >= 0 AND character_count > 0", name="valid_size"),
+        CheckConstraint(
+            "page_count IS NULL OR page_count > 0",
+            name="valid_page_count",
+        ),
+        CheckConstraint(
+            f"embedding_dimensions = {EMBEDDING_DIMENSIONS}",
+            name="supported_embedding_dimensions",
+        ),
+        UniqueConstraint("content_sha256"),
+        Index(
+            "ix_knowledge_documents_stock_id_created_at_desc",
+            "stock_id",
+            desc("created_at"),
+        ),
+        Index(
+            "ix_knowledge_documents_type_created_at_desc",
+            "document_type",
+            desc("created_at"),
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        PostgreSQLUUID(as_uuid=True),
+        primary_key=True,
+        default=uuid4,
+    )
+    stock_id: Mapped[int | None] = mapped_column(
+        BigInteger,
+        ForeignKey("stocks.id", ondelete="RESTRICT"),
+    )
+    document_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    title: Mapped[str] = mapped_column(String(256), nullable=False)
+    source_name: Mapped[str] = mapped_column(String(512), nullable=False)
+    source_uri: Mapped[str | None] = mapped_column(String(2048))
+    mime_type: Mapped[str] = mapped_column(String(128), nullable=False)
+    content_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    byte_size: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    character_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    page_count: Mapped[int | None] = mapped_column(Integer)
+    embedding_model: Mapped[str] = mapped_column(String(128), nullable=False)
+    embedding_dimensions: Mapped[int] = mapped_column(Integer, nullable=False)
+    source_metadata: Mapped[dict[str, Any]] = mapped_column(
+        "metadata",
+        JSONB,
+        nullable=False,
+        default=dict,
+        server_default=text("'{}'::jsonb"),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    stock: Mapped[Stock | None] = relationship(back_populates="knowledge_documents")
+    chunks: Mapped[list[DocumentChunk]] = relationship(
+        back_populates="document",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        order_by="DocumentChunk.chunk_index",
+    )
+
+
+class DocumentChunk(TimestampMixin, Base):
+    __tablename__ = "document_chunks"
+    __table_args__ = (
+        CheckConstraint("chunk_index >= 0", name="non_negative_chunk_index"),
+        CheckConstraint(
+            "start_character >= 0 AND end_character > start_character",
+            name="valid_character_range",
+        ),
+        CheckConstraint("character_count > 0", name="positive_character_count"),
+        UniqueConstraint("document_id", "chunk_index"),
+        Index("ix_document_chunks_document_id", "document_id"),
+        Index(
+            "ix_document_chunks_embedding_hnsw",
+            "embedding",
+            postgresql_using="hnsw",
+            postgresql_ops={"embedding": "vector_cosine_ops"},
+            postgresql_with={"m": 16, "ef_construction": 64},
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        PostgreSQLUUID(as_uuid=True),
+        primary_key=True,
+        default=uuid4,
+    )
+    document_id: Mapped[UUID] = mapped_column(
+        PostgreSQLUUID(as_uuid=True),
+        ForeignKey("knowledge_documents.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    chunk_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    content_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    start_character: Mapped[int] = mapped_column(Integer, nullable=False)
+    end_character: Mapped[int] = mapped_column(Integer, nullable=False)
+    character_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    embedding: Mapped[list[float]] = mapped_column(
+        VECTOR(EMBEDDING_DIMENSIONS),
+        nullable=False,
+    )
+    chunk_metadata: Mapped[dict[str, Any]] = mapped_column(
+        "metadata",
+        JSONB,
+        nullable=False,
+        default=dict,
+        server_default=text("'{}'::jsonb"),
+    )
+
+    document: Mapped[KnowledgeDocument] = relationship(back_populates="chunks")

@@ -1,0 +1,607 @@
+import { useMemo, useRef, useState } from 'react'
+import type { KeyboardEvent, MouseEvent, PointerEvent, WheelEvent } from 'react'
+
+import {
+  aggregatePrices,
+  MOVING_AVERAGE_PERIODS,
+  withMovingAverages,
+} from '../chartData'
+import type {
+  ChartInterval,
+  ChartPoint,
+  MovingAveragePeriod,
+} from '../chartData'
+import type { DailyPrice } from '../types'
+
+interface KlineChartProps {
+  prices: DailyPrice[]
+}
+
+interface Crosshair {
+  index: number
+  y: number
+}
+
+interface Viewport {
+  key: string
+  start: number
+  count: number
+}
+
+interface DragState {
+  pointerId: number
+  startClientX: number
+  viewportStart: number
+}
+
+const WIDTH = 1040
+const HEIGHT = 520
+const CHART_TOP = 62
+const PRICE_BOTTOM = 366
+const VOLUME_TOP = 404
+const VOLUME_BOTTOM = 474
+const LEFT_PADDING = 24
+const RIGHT_PADDING = 76
+const MIN_VISIBLE_BARS = 10
+const INTERVAL_LABELS: Record<ChartInterval, string> = {
+  '1D': 'Daily',
+  '1W': 'Weekly',
+  '1M': 'Monthly',
+}
+const MA_COLORS: Record<MovingAveragePeriod, string> = {
+  5: '#d97706',
+  10: '#db2777',
+  20: '#2563eb',
+  30: '#7c3aed',
+  60: '#0f766e',
+}
+
+function formatCompact(value: number): string {
+  return new Intl.NumberFormat('en', {
+    notation: 'compact',
+    maximumFractionDigits: 1,
+  }).format(value)
+}
+
+function formatPrice(value: number | null): string {
+  return value === null ? '--' : value.toFixed(2)
+}
+
+function movingAveragePath(
+  points: ChartPoint[],
+  period: MovingAveragePeriod,
+  xForIndex: (index: number) => number,
+  yForPrice: (value: number) => number,
+): string {
+  let path = ''
+  let drawing = false
+  points.forEach((point, index) => {
+    const value = point.movingAverages[period]
+    if (value === null) {
+      drawing = false
+      return
+    }
+    path += `${drawing ? ' L' : ' M'} ${xForIndex(index)} ${yForPrice(value)}`
+    drawing = true
+  })
+  return path.trim()
+}
+
+function KlineChart({ prices }: KlineChartProps) {
+  const [interval, setInterval] = useState<ChartInterval>('1D')
+  const [crosshair, setCrosshair] = useState<Crosshair | null>(null)
+  const [viewportState, setViewportState] = useState<Viewport>({
+    key: '',
+    start: 0,
+    count: 0,
+  })
+  const [isDragging, setIsDragging] = useState(false)
+  const svgRef = useRef<SVGSVGElement>(null)
+  const dragRef = useRef<DragState | null>(null)
+  const allPoints = useMemo(
+    () => withMovingAverages(aggregatePrices(prices, interval)),
+    [interval, prices],
+  )
+
+  if (prices.length === 0) {
+    return (
+      <div className="empty-state chart-empty">
+        No daily price records are available for this stock.
+      </div>
+    )
+  }
+
+  const viewportKey = `${interval}:${allPoints.length}:${allPoints[0]?.bar.interval_start}:${allPoints.at(-1)?.bar.interval_start}`
+  const minimumVisibleCount = Math.min(MIN_VISIBLE_BARS, allPoints.length)
+  const requestedViewport =
+    viewportState.key === viewportKey
+      ? viewportState
+      : {
+          key: viewportKey,
+          start: 0,
+          count: allPoints.length,
+        }
+  const visibleCount = Math.max(
+    minimumVisibleCount,
+    Math.min(allPoints.length, requestedViewport.count),
+  )
+  const maximumStart = Math.max(0, allPoints.length - visibleCount)
+  const visibleStart = Math.max(
+    0,
+    Math.min(maximumStart, requestedViewport.start),
+  )
+  const points = allPoints.slice(visibleStart, visibleStart + visibleCount)
+  const isZoomed = points.length < allPoints.length
+  const canZoomIn = points.length > minimumVisibleCount
+  const canZoomOut = isZoomed
+
+  const lows = points.map((point) => point.bar.low)
+  const highs = points.map((point) => point.bar.high)
+  const minimum = Math.min(...lows)
+  const maximum = Math.max(...highs)
+  const rawRange = maximum - minimum || Math.max(maximum * 0.02, 1)
+  const rangePadding = rawRange * 0.08
+  const priceMinimum = Math.max(0, minimum - rangePadding)
+  const priceMaximum = maximum + rangePadding
+  const priceRange = priceMaximum - priceMinimum
+  const maximumVolume = Math.max(...points.map((point) => point.bar.volume), 1)
+  const chartWidth = WIDTH - LEFT_PADDING - RIGHT_PADDING
+  const slotWidth = chartWidth / points.length
+  const candleWidth = Math.max(3, Math.min(14, slotWidth * 0.62))
+  const xForIndex = (index: number) =>
+    LEFT_PADDING + slotWidth * index + slotWidth / 2
+  const priceY = (value: number) =>
+    CHART_TOP +
+    ((priceMaximum - value) / priceRange) * (PRICE_BOTTOM - CHART_TOP)
+  const volumeY = (value: number) =>
+    VOLUME_BOTTOM - (value / maximumVolume) * (VOLUME_BOTTOM - VOLUME_TOP)
+  const gridValues = Array.from(
+    { length: 6 },
+    (_, index) => priceMaximum - (priceRange * index) / 5,
+  )
+  const labelIndexes = Array.from(
+    new Set(
+      Array.from({ length: Math.min(6, points.length) }, (_, index) =>
+        Math.round(
+          (index * (points.length - 1)) /
+            Math.max(1, Math.min(5, points.length - 1)),
+        ),
+      ),
+    ),
+  )
+  const activePoint = points[crosshair?.index ?? points.length - 1]
+  const activeBar = activePoint.bar
+  const previousBar =
+    points[Math.max(0, (crosshair?.index ?? points.length - 1) - 1)]?.bar
+  const change = previousBar ? activeBar.close - previousBar.close : 0
+  const changePercent =
+    previousBar && previousBar.close !== 0
+      ? (change / previousBar.close) * 100
+      : 0
+
+  const updateCrosshair = (event: MouseEvent<SVGSVGElement>) => {
+    if (dragRef.current) {
+      return
+    }
+    const bounds = svgRef.current?.getBoundingClientRect()
+    if (!bounds || bounds.width === 0 || bounds.height === 0) {
+      return
+    }
+    const x = ((event.clientX - bounds.left) / bounds.width) * WIDTH
+    const y = ((event.clientY - bounds.top) / bounds.height) * HEIGHT
+    const index = Math.max(
+      0,
+      Math.min(points.length - 1, Math.floor((x - LEFT_PADDING) / slotWidth)),
+    )
+    setCrosshair({
+      index,
+      y: Math.max(CHART_TOP, Math.min(VOLUME_BOTTOM, y)),
+    })
+  }
+
+  const updateViewport = (count: number, start: number) => {
+    const nextCount = Math.max(
+      minimumVisibleCount,
+      Math.min(allPoints.length, count),
+    )
+    setViewportState({
+      key: viewportKey,
+      count: nextCount,
+      start: Math.max(0, Math.min(allPoints.length - nextCount, start)),
+    })
+    setCrosshair(null)
+  }
+
+  const zoomAt = (direction: 'in' | 'out', anchorRatio = 0.5) => {
+    const nextCount =
+      direction === 'in'
+        ? Math.max(minimumVisibleCount, Math.floor(points.length * 0.8))
+        : Math.min(allPoints.length, Math.ceil(points.length * 1.25))
+    if (nextCount === points.length) {
+      return
+    }
+
+    const anchorIndex =
+      visibleStart + Math.max(0, Math.min(1, anchorRatio)) * (points.length - 1)
+    const nextStart = Math.round(
+      anchorIndex - anchorRatio * Math.max(0, nextCount - 1),
+    )
+    updateViewport(nextCount, nextStart)
+  }
+
+  const handleWheel = (event: WheelEvent<SVGSVGElement>) => {
+    if (event.deltaY === 0) {
+      return
+    }
+    event.preventDefault()
+    const bounds = svgRef.current?.getBoundingClientRect()
+    const anchorRatio =
+      bounds && bounds.width > 0
+        ? (event.clientX - bounds.left) / bounds.width
+        : 0.5
+    zoomAt(event.deltaY < 0 ? 'in' : 'out', anchorRatio)
+  }
+
+  const startDragging = (event: PointerEvent<SVGSVGElement>) => {
+    if (!isZoomed || event.button !== 0) {
+      return
+    }
+    dragRef.current = {
+      pointerId: event.pointerId,
+      startClientX: event.clientX,
+      viewportStart: visibleStart,
+    }
+    event.currentTarget.setPointerCapture(event.pointerId)
+    setIsDragging(true)
+    setCrosshair(null)
+  }
+
+  const dragViewport = (event: PointerEvent<SVGSVGElement>) => {
+    const drag = dragRef.current
+    const bounds = svgRef.current?.getBoundingClientRect()
+    if (
+      !drag ||
+      drag.pointerId !== event.pointerId ||
+      !bounds ||
+      bounds.width === 0
+    ) {
+      return
+    }
+    const barsMoved = Math.round(
+      ((drag.startClientX - event.clientX) / bounds.width) * points.length,
+    )
+    updateViewport(points.length, drag.viewportStart + barsMoved)
+  }
+
+  const stopDragging = (event: PointerEvent<SVGSVGElement>) => {
+    if (dragRef.current?.pointerId !== event.pointerId) {
+      return
+    }
+    dragRef.current = null
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId)
+    }
+    setIsDragging(false)
+  }
+
+  const moveCrosshairWithKeyboard = (event: KeyboardEvent<SVGSVGElement>) => {
+    if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') {
+      return
+    }
+    event.preventDefault()
+    const current = crosshair?.index ?? points.length - 1
+    const direction = event.key === 'ArrowLeft' ? -1 : 1
+    setCrosshair({
+      index: Math.max(0, Math.min(points.length - 1, current + direction)),
+      y: priceY(
+        points[Math.max(0, Math.min(points.length - 1, current + direction))]
+          .bar.close,
+      ),
+    })
+  }
+
+  const crosshairPrice =
+    crosshair && crosshair.y <= PRICE_BOTTOM
+      ? priceMaximum -
+        ((crosshair.y - CHART_TOP) / (PRICE_BOTTOM - CHART_TOP)) * priceRange
+      : null
+
+  return (
+    <div className="chart-workspace">
+      <div className="chart-toolbar">
+        <div
+          className="interval-selector"
+          role="group"
+          aria-label="K-line interval"
+        >
+          {(['1D', '1W', '1M'] as const).map((value) => (
+            <button
+              className={interval === value ? 'active' : ''}
+              key={value}
+              onClick={() => {
+                setInterval(value)
+                setCrosshair(null)
+                setViewportState({
+                  key: '',
+                  start: 0,
+                  count: 0,
+                })
+              }}
+              type="button"
+              aria-pressed={interval === value}
+              title={INTERVAL_LABELS[value]}
+            >
+              {value}
+            </button>
+          ))}
+        </div>
+        <div className="chart-tools">
+          <span className="chart-mode-note">
+            {INTERVAL_LABELS[interval]} bars · {points.length}/
+            {allPoints.length} visible
+          </span>
+          <div
+            className="zoom-controls"
+            role="group"
+            aria-label="Chart zoom controls"
+          >
+            <button
+              type="button"
+              aria-label="Zoom out"
+              disabled={!canZoomOut}
+              onClick={() => zoomAt('out')}
+            >
+              -
+            </button>
+            <button
+              type="button"
+              aria-label="Zoom in"
+              disabled={!canZoomIn}
+              onClick={() => zoomAt('in')}
+            >
+              +
+            </button>
+            <button
+              type="button"
+              disabled={!isZoomed}
+              onClick={() => updateViewport(allPoints.length, 0)}
+            >
+              Reset
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {prices.length < 60 && (
+        <div className="history-notice" role="note">
+          Only {prices.length} stored daily record
+          {prices.length === 1 ? '' : 's'}. Import more history to populate
+          longer moving averages and meaningful weekly or monthly views.
+        </div>
+      )}
+
+      <div className="chart-wrap">
+        <div className="chart-legend" aria-live="polite">
+          <div className="ohlc-line">
+            <strong>{activeBar.trade_date}</strong>
+            <span>O {formatPrice(activeBar.open)}</span>
+            <span>H {formatPrice(activeBar.high)}</span>
+            <span>L {formatPrice(activeBar.low)}</span>
+            <span>C {formatPrice(activeBar.close)}</span>
+            <span className={change >= 0 ? 'positive' : 'negative'}>
+              {change >= 0 ? '+' : ''}
+              {change.toFixed(2)} ({changePercent >= 0 ? '+' : ''}
+              {changePercent.toFixed(2)}%)
+            </span>
+          </div>
+          <div className="ma-legend">
+            {MOVING_AVERAGE_PERIODS.map((period) => (
+              <span key={period} style={{ color: MA_COLORS[period] }}>
+                MA{period} {formatPrice(activePoint.movingAverages[period])}
+              </span>
+            ))}
+          </div>
+        </div>
+
+        <svg
+          ref={svgRef}
+          className="kline-chart"
+          viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
+          role="img"
+          aria-label={
+            isZoomed
+              ? `${INTERVAL_LABELS[interval]} K-line chart showing ${points.length} of ${allPoints.length} price records`
+              : `${INTERVAL_LABELS[interval]} K-line chart with ${allPoints.length} price records`
+          }
+          tabIndex={0}
+          onMouseMove={updateCrosshair}
+          onMouseLeave={() => setCrosshair(null)}
+          onKeyDown={moveCrosshairWithKeyboard}
+          onWheel={handleWheel}
+          onPointerDown={startDragging}
+          onPointerMove={dragViewport}
+          onPointerUp={stopDragging}
+          onPointerCancel={stopDragging}
+          data-dragging={isDragging || undefined}
+        >
+          <title>
+            {INTERVAL_LABELS[interval]} K-line, moving averages, and volume
+            chart
+          </title>
+          {gridValues.map((value) => {
+            const y = priceY(value)
+            return (
+              <g key={value}>
+                <line
+                  className="chart-grid"
+                  x1={LEFT_PADDING}
+                  x2={WIDTH - RIGHT_PADDING}
+                  y1={y}
+                  y2={y}
+                />
+                <text
+                  className="axis-label price-axis-label"
+                  x={WIDTH - RIGHT_PADDING + 10}
+                  y={y + 4}
+                >
+                  {value.toFixed(2)}
+                </text>
+              </g>
+            )
+          })}
+
+          {points.map((point, index) => {
+            const { bar } = point
+            const x = xForIndex(index)
+            const rising = bar.close >= bar.open
+            const bodyTop = priceY(Math.max(bar.open, bar.close))
+            const bodyBottom = priceY(Math.min(bar.open, bar.close))
+            const bodyHeight = Math.max(2, bodyBottom - bodyTop)
+            const className = rising ? 'candle-up' : 'candle-down'
+            const volumeTop = volumeY(bar.volume)
+
+            return (
+              <g key={bar.interval_start}>
+                <line
+                  className={`candle-wick ${className}`}
+                  x1={x}
+                  x2={x}
+                  y1={priceY(bar.high)}
+                  y2={priceY(bar.low)}
+                />
+                <rect
+                  className={`candle-body ${className}`}
+                  x={x - candleWidth / 2}
+                  y={bodyTop}
+                  width={candleWidth}
+                  height={bodyHeight}
+                />
+                <rect
+                  className={`volume-bar ${className}`}
+                  x={x - candleWidth / 2}
+                  y={volumeTop}
+                  width={candleWidth}
+                  height={Math.max(1, VOLUME_BOTTOM - volumeTop)}
+                />
+              </g>
+            )
+          })}
+
+          {MOVING_AVERAGE_PERIODS.map((period) => {
+            const path = movingAveragePath(points, period, xForIndex, priceY)
+            return path ? (
+              <path
+                className="ma-line"
+                d={path}
+                key={period}
+                style={{ stroke: MA_COLORS[period] }}
+              />
+            ) : null
+          })}
+
+          <line
+            className="chart-separator"
+            x1={LEFT_PADDING}
+            x2={WIDTH - RIGHT_PADDING}
+            y1={VOLUME_TOP - 16}
+            y2={VOLUME_TOP - 16}
+          />
+          <text
+            className="axis-label volume-label"
+            x={LEFT_PADDING}
+            y={VOLUME_TOP - 22}
+          >
+            Vol {formatCompact(activeBar.volume)}
+          </text>
+          <text
+            className="axis-label"
+            x={WIDTH - RIGHT_PADDING + 10}
+            y={VOLUME_TOP + 4}
+          >
+            {formatCompact(maximumVolume)}
+          </text>
+
+          {labelIndexes.map((index) => (
+            <text
+              className="date-label"
+              key={points[index].bar.interval_start}
+              x={xForIndex(index)}
+              y={HEIGHT - 14}
+              textAnchor={
+                index === 0
+                  ? 'start'
+                  : index === points.length - 1
+                    ? 'end'
+                    : 'middle'
+              }
+            >
+              {points[index].bar.trade_date}
+            </text>
+          ))}
+
+          {crosshair && (
+            <g className="crosshair" aria-hidden="true">
+              <line
+                x1={xForIndex(crosshair.index)}
+                x2={xForIndex(crosshair.index)}
+                y1={CHART_TOP}
+                y2={VOLUME_BOTTOM}
+              />
+              <line
+                x1={LEFT_PADDING}
+                x2={WIDTH - RIGHT_PADDING}
+                y1={crosshair.y}
+                y2={crosshair.y}
+              />
+              <rect
+                className="crosshair-label-bg"
+                x={WIDTH - RIGHT_PADDING}
+                y={crosshair.y - 11}
+                width={RIGHT_PADDING}
+                height={22}
+              />
+              <text
+                className="crosshair-label"
+                x={WIDTH - RIGHT_PADDING + 8}
+                y={crosshair.y + 4}
+              >
+                {crosshairPrice === null
+                  ? formatCompact(activeBar.volume)
+                  : crosshairPrice.toFixed(2)}
+              </text>
+              <rect
+                className="crosshair-label-bg"
+                x={Math.max(
+                  LEFT_PADDING,
+                  Math.min(
+                    WIDTH - RIGHT_PADDING - 84,
+                    xForIndex(crosshair.index) - 42,
+                  ),
+                )}
+                y={VOLUME_BOTTOM + 8}
+                width={84}
+                height={22}
+              />
+              <text
+                className="crosshair-label"
+                x={Math.max(
+                  LEFT_PADDING + 42,
+                  Math.min(
+                    WIDTH - RIGHT_PADDING - 42,
+                    xForIndex(crosshair.index),
+                  ),
+                )}
+                y={VOLUME_BOTTOM + 23}
+                textAnchor="middle"
+              >
+                {activeBar.trade_date}
+              </text>
+            </g>
+          )}
+        </svg>
+      </div>
+    </div>
+  )
+}
+
+export default KlineChart

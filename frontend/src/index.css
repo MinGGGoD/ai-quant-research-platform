@@ -7,12 +7,23 @@
     BlinkMacSystemFont,
     'Segoe UI',
     sans-serif;
-  color: #0f172a;
-  background: #f8fafc;
+  color: #182018;
+  background: #f3f1e8;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
+  --ink: #182018;
+  --muted: #697069;
+  --line: #d9d8ce;
+  --panel: rgba(255, 255, 251, 0.88);
+  --accent: #1f6b4f;
+  --accent-soft: #deebe3;
+  --amber: #a76516;
+  --danger: #a33d32;
+}
+
+* {
+  box-sizing: border-box;
 }
 
 body {
@@ -20,13 +31,30 @@ body {
   min-width: 320px;
   min-height: 100vh;
   background:
-    radial-gradient(circle at top left, #dbeafe 0, transparent 32rem), #f8fafc;
+    linear-gradient(rgba(31, 107, 79, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(31, 107, 79, 0.035) 1px, transparent 1px),
+    radial-gradient(circle at 8% 0%, #e8ead7 0, transparent 28rem), #f3f1e8;
+  background-size:
+    32px 32px,
+    32px 32px,
+    auto;
+}
+
+button,
+input {
+  font: inherit;
+}
+
+button {
+  color: inherit;
+}
+
+button:focus-visible,
+input:focus-visible {
+  outline: 3px solid rgba(31, 107, 79, 0.25);
+  outline-offset: 2px;
 }
 
 #root {
   min-height: 100vh;
-  display: grid;
-  place-items: center;
-  box-sizing: border-box;
-  padding: clamp(2rem, 7vw, 6rem);
 }

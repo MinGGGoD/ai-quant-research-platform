@@ -72,6 +72,24 @@ export interface StockPricesResponse {
   items: DailyPrice[]
 }
 
+export interface DateRange {
+  from_date: string
+  to_date: string
+}
+
+export interface StockPriceSyncMetadata {
+  requested_range: DateRange
+  effective_range: DateRange | null
+  cache_hit: boolean
+  fetched_ranges: DateRange[]
+  prices_inserted: number
+  prices_updated: number
+}
+
+export interface StockPriceSyncResponse extends StockPricesResponse {
+  sync: StockPriceSyncMetadata
+}
+
 export interface ScannerRunListResponse {
   items: ScannerRun[]
   pagination: Pagination

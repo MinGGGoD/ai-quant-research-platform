@@ -152,6 +152,50 @@
   color: var(--ink);
 }
 
+.date-range {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+  min-width: 0;
+  margin: 2px 0 0;
+  padding: 0;
+  border: 0;
+}
+
+.date-range legend {
+  grid-column: 1 / -1;
+  padding: 0;
+  color: var(--muted);
+  font-size: 0.64rem;
+  font-weight: 700;
+}
+
+.date-range label {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 0.61rem;
+}
+
+.date-range input {
+  width: 100%;
+  min-width: 0;
+  padding: 7px 6px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--ink);
+  font-size: 0.64rem;
+}
+
+.date-range-error {
+  margin: 0;
+  color: var(--danger);
+  font-size: 0.65rem;
+  line-height: 1.4;
+}
+
 .search-row button,
 .error-state button {
   border: 0;
@@ -204,7 +248,7 @@
 
 .stock-list {
   display: grid;
-  max-height: calc(100vh - 305px);
+  max-height: calc(100vh - 390px);
   overflow-y: auto;
   margin: 0 -7px;
   padding: 2px 7px;
@@ -436,6 +480,17 @@
 }
 
 .history-notice {
+  padding: 8px 11px;
+  border: 1px solid #ead9b4;
+  border-radius: 9px;
+  background: #fff8e9;
+  color: #7a5a18;
+  font-size: 0.68rem;
+  line-height: 1.45;
+}
+
+.sync-warning {
+  margin-bottom: 9px;
   padding: 8px 11px;
   border: 1px solid #ead9b4;
   border-radius: 9px;

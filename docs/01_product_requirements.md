@@ -82,6 +82,8 @@ dashboard.
 - Clearly display the market-data date and scan execution time.
 - Display stored daily K-line data with daily, weekly, and monthly research
   views, moving averages, volume, hover inspection, and zoom/pan navigation.
+- Let the researcher choose a daily-price date range, defaulting to the past
+  two years, and synchronize only missing trading sessions when searching.
 - Keep up to six recently searched or opened stocks as local browser shortcuts.
 - Present neutral research data without action-oriented language.
 

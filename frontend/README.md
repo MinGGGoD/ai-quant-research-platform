@@ -8,7 +8,9 @@ scanner runs. Daily records can be viewed directly or aggregated into weekly
 and monthly bars. The chart includes MA5, MA10, MA20, MA30, MA60, hover
 crosshairs, OHLC/indicator readouts, wheel/button zoom, and drag-to-pan while
 zoomed. The stock search keeps up to six recently opened search results in local
-browser storage for quick access.
+browser storage for quick access. A start/end date picker defaults to the past
+two years. Submitting a search or actively selecting a stock asks the backend to
+cache only missing trading sessions for that period before rendering the chart.
 
 Weekly and monthly bars are derived from stored daily records. The frontend does
 not invent intraday bars, and minute-level intervals remain unavailable until a

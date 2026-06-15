@@ -2,6 +2,7 @@ import type {
   ApiErrorPayload,
   ScannerRunListResponse,
   StockListResponse,
+  StockPriceSyncResponse,
   StockPricesResponse,
   StockSignalsResponse,
 } from './types'
@@ -20,10 +21,16 @@ export class ApiError extends Error {
   }
 }
 
-async function getJson<T>(path: string, signal?: AbortSignal): Promise<T> {
+async function requestJson<T>(
+  path: string,
+  options: RequestInit = {},
+): Promise<T> {
   const response = await fetch(`${API_BASE_URL}${path}`, {
-    headers: { Accept: 'application/json' },
-    signal,
+    ...options,
+    headers: {
+      Accept: 'application/json',
+      ...options.headers,
+    },
   })
 
   if (!response.ok) {
@@ -48,11 +55,19 @@ function stockResourcePath(
   exchange: string,
   resource: 'prices' | 'signals',
   limit: number,
+  fromDate?: string,
+  toDate?: string,
 ): string {
   const params = new URLSearchParams({
     exchange,
     limit: String(limit),
   })
+  if (fromDate) {
+    params.set('from_date', fromDate)
+  }
+  if (toDate) {
+    params.set('to_date', toDate)
+  }
   return `/api/v1/stocks/${encodeURIComponent(symbol)}/${resource}?${params}`
 }
 
@@ -69,27 +84,59 @@ export function getStocks(
   if (query.trim()) {
     params.set('query', query.trim())
   }
-  return getJson(`/api/v1/stocks?${params}`, signal)
+  return requestJson(`/api/v1/stocks?${params}`, { signal })
 }
 
 export function getStockPrices(
   symbol: string,
   exchange: string,
+  fromDate: string,
+  toDate: string,
   signal?: AbortSignal,
 ): Promise<StockPricesResponse> {
-  return getJson(stockResourcePath(symbol, exchange, 'prices', 1000), signal)
+  return requestJson(
+    stockResourcePath(symbol, exchange, 'prices', 1000, fromDate, toDate),
+    { signal },
+  )
+}
+
+export function syncStockPrices(
+  symbol: string,
+  exchange: string,
+  fromDate: string,
+  toDate: string,
+  signal?: AbortSignal,
+): Promise<StockPriceSyncResponse> {
+  const params = new URLSearchParams({ exchange })
+  return requestJson(
+    `/api/v1/stocks/${encodeURIComponent(symbol)}/prices/sync?${params}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        from_date: fromDate,
+        to_date: toDate,
+      }),
+      signal,
+    },
+  )
 }
 
 export function getStockSignals(
   symbol: string,
   exchange: string,
+  fromDate: string,
+  toDate: string,
   signal?: AbortSignal,
 ): Promise<StockSignalsResponse> {
-  return getJson(stockResourcePath(symbol, exchange, 'signals', 50), signal)
+  return requestJson(
+    stockResourcePath(symbol, exchange, 'signals', 50, fromDate, toDate),
+    { signal },
+  )
 }
 
 export function getScannerRuns(
   signal?: AbortSignal,
 ): Promise<ScannerRunListResponse> {
-  return getJson('/api/v1/scanner-runs?limit=8', signal)
+  return requestJson('/api/v1/scanner-runs?limit=8', { signal })
 }

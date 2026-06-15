@@ -105,8 +105,24 @@ function jsonResponse(payload: unknown, status = 200): Response {
   })
 }
 
-function installSuccessfulFetch(): ReturnType<typeof vi.fn> {
-  const fetchMock = vi.fn((input: RequestInfo | URL) => {
+function expectedDefaultDateRange(): {
+  fromDate: string
+  toDate: string
+} {
+  const end = new Date()
+  const start = new Date(end)
+  start.setFullYear(start.getFullYear() - 2)
+  const format = (value: Date) =>
+    [
+      value.getFullYear(),
+      String(value.getMonth() + 1).padStart(2, '0'),
+      String(value.getDate()).padStart(2, '0'),
+    ].join('-')
+  return { fromDate: format(start), toDate: format(end) }
+}
+
+function installSuccessfulFetch(syncStatus = 200): ReturnType<typeof vi.fn> {
+  const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(String(input))
 
     if (url.pathname === '/api/v1/stocks') {
@@ -122,6 +138,44 @@ function installSuccessfulFetch(): ReturnType<typeof vi.fn> {
         jsonResponse({
           items: [scannerRun],
           pagination: { limit: 8, offset: 0, total: 1 },
+        }),
+      )
+    }
+    if (url.pathname.endsWith('/prices/sync')) {
+      if (syncStatus !== 200) {
+        return Promise.resolve(
+          jsonResponse(
+            {
+              error: {
+                code: 'market_data_provider_unavailable',
+                message: 'AShareHub price synchronization is not configured.',
+                request_id: 'request-sync-unavailable',
+              },
+            },
+            syncStatus,
+          ),
+        )
+      }
+      const symbol = url.pathname
+        .split('/')
+        .at(-3) as keyof typeof pricesBySymbol
+      const body = JSON.parse(String(init?.body)) as {
+        from_date: string
+        to_date: string
+      }
+      return Promise.resolve(
+        jsonResponse({
+          stock: stocks.find((stock) => stock.symbol === symbol),
+          price_adjustment: 'source_defined',
+          items: pricesBySymbol[symbol],
+          sync: {
+            requested_range: body,
+            effective_range: body,
+            cache_hit: false,
+            fetched_ranges: [body],
+            prices_inserted: pricesBySymbol[symbol].length,
+            prices_updated: 0,
+          },
         }),
       )
     }
@@ -191,6 +245,16 @@ describe('App', () => {
     ).toBeInTheDocument()
   })
 
+  it('defaults the daily price period to the past two years', () => {
+    installSuccessfulFetch()
+    const expected = expectedDefaultDateRange()
+
+    render(<App />)
+
+    expect(screen.getByLabelText('From')).toHaveValue(expected.fromDate)
+    expect(screen.getByLabelText('To')).toHaveValue(expected.toDate)
+  })
+
   it('switches daily data into weekly and monthly chart levels', async () => {
     installSuccessfulFetch()
     render(<App />)
@@ -235,6 +299,25 @@ describe('App', () => {
     ).toBeInTheDocument()
   })
 
+  it('falls back to cached prices when synchronization is unavailable', async () => {
+    installSuccessfulFetch(503)
+    render(<App />)
+
+    await screen.findByRole('heading', { name: 'Synthetic Alpha' })
+    fireEvent.click(
+      screen.getByRole('option', { name: /000001Synthetic BetaSZSE/i }),
+    )
+
+    expect(
+      await screen.findByRole('img', {
+        name: 'Daily K-line chart with 1 price records',
+      }),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText(/Showing cached records instead/i),
+    ).toBeInTheDocument()
+  })
+
   it('submits a stock search through the API client', async () => {
     const fetchMock = installSuccessfulFetch()
     render(<App />)
@@ -250,6 +333,22 @@ describe('App', () => {
         expect.stringContaining('query=600519'),
         expect.objectContaining({
           headers: { Accept: 'application/json' },
+        }),
+      )
+    })
+
+    const expected = expectedDefaultDateRange()
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        expect.stringContaining(
+          '/api/v1/stocks/600519/prices/sync?exchange=SSE',
+        ),
+        expect.objectContaining({
+          method: 'POST',
+          body: JSON.stringify({
+            from_date: expected.fromDate,
+            to_date: expected.toDate,
+          }),
         }),
       )
     })

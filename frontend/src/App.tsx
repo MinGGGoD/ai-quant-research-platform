@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 
 import {
@@ -7,6 +7,7 @@ import {
   getStockPrices,
   getStockSignals,
   getStocks,
+  syncStockPrices,
 } from './api'
 import './App.css'
 import KlineChart from './components/KlineChart'
@@ -15,12 +16,39 @@ import type {
   Pagination,
   ScannerRun,
   Stock,
+  StockPriceSyncMetadata,
+  StockPriceSyncResponse,
+  StockPricesResponse,
   TechnicalSignal,
 } from './types'
 
 const EMPTY_PAGINATION: Pagination = { limit: 30, offset: 0, total: 0 }
 const RECENT_STOCKS_KEY = 'ai-quant-recent-stocks'
 const RECENT_STOCK_LIMIT = 6
+
+interface SelectedDateRange {
+  fromDate: string
+  toDate: string
+}
+
+type DetailRequestMode = 'cache' | 'sync'
+
+function localIsoDate(value: Date): string {
+  const year = value.getFullYear()
+  const month = String(value.getMonth() + 1).padStart(2, '0')
+  const day = String(value.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+function defaultDateRange(): SelectedDateRange {
+  const end = new Date()
+  const start = new Date(end)
+  start.setFullYear(start.getFullYear() - 2)
+  return {
+    fromDate: localIsoDate(start),
+    toDate: localIsoDate(end),
+  }
+}
 
 function loadRecentStocks(): Stock[] {
   try {
@@ -76,6 +104,12 @@ function errorMessage(error: unknown): string {
   return 'The research data could not be loaded.'
 }
 
+function hasSyncMetadata(
+  response: StockPricesResponse | StockPriceSyncResponse,
+): response is StockPriceSyncResponse {
+  return 'sync' in response
+}
+
 function App() {
   const [stocks, setStocks] = useState<Stock[]>([])
   const [stockPagination, setStockPagination] =
@@ -84,6 +118,8 @@ function App() {
   const [prices, setPrices] = useState<DailyPrice[]>([])
   const [signals, setSignals] = useState<TechnicalSignal[]>([])
   const [scannerRuns, setScannerRuns] = useState<ScannerRun[]>([])
+  const [syncMetadata, setSyncMetadata] =
+    useState<StockPriceSyncMetadata | null>(null)
   const [recentStocks, setRecentStocks] = useState<Stock[]>(loadRecentStocks)
   const [searchInput, setSearchInput] = useState('')
   const [activeQuery, setActiveQuery] = useState('')
@@ -93,10 +129,20 @@ function App() {
   const [runsLoading, setRunsLoading] = useState(true)
   const [stocksError, setStocksError] = useState<string | null>(null)
   const [detailError, setDetailError] = useState<string | null>(null)
+  const [syncWarning, setSyncWarning] = useState<string | null>(null)
   const [runsError, setRunsError] = useState<string | null>(null)
+  const [dateRangeError, setDateRangeError] = useState<string | null>(null)
+  const [dateRange, setDateRange] =
+    useState<SelectedDateRange>(defaultDateRange)
+  const [appliedDateRange, setAppliedDateRange] =
+    useState<SelectedDateRange>(dateRange)
+  const [detailRequestMode, setDetailRequestMode] =
+    useState<DetailRequestMode>('cache')
   const [stockReloadToken, setStockReloadToken] = useState(0)
   const [detailReloadToken, setDetailReloadToken] = useState(0)
   const [runsReloadToken, setRunsReloadToken] = useState(0)
+  const pendingSearchSync = useRef(false)
+  const today = localIsoDate(new Date())
 
   const rememberStock = useCallback((stock: Stock) => {
     setRecentStocks((current) => {
@@ -117,11 +163,19 @@ function App() {
   }, [])
 
   const selectStock = useCallback(
-    (stock: Stock | null, remember = true) => {
+    (
+      stock: Stock | null,
+      remember = true,
+      requestMode: DetailRequestMode = 'sync',
+    ) => {
       setSelectedStock(stock)
       setDetailError(null)
+      setSyncWarning(null)
+      setSyncMetadata(null)
       if (stock) {
         setDetailLoading(true)
+        setDetailRequestMode(requestMode)
+        setDetailReloadToken((value) => value + 1)
         if (remember) {
           rememberStock(stock)
         }
@@ -141,10 +195,13 @@ function App() {
       .then((response) => {
         setStocks(response.items)
         setStockPagination(response.pagination)
+        const shouldSync = pendingSearchSync.current && stockOffset === 0
         selectStock(
           response.items[0] ?? null,
           activeQuery.length > 0 && stockOffset === 0,
+          shouldSync ? 'sync' : 'cache',
         )
+        pendingSearchSync.current = false
       })
       .catch((error: unknown) => {
         if (error instanceof DOMException && error.name === 'AbortError') {
@@ -152,6 +209,7 @@ function App() {
         }
         setStocks([])
         selectStock(null)
+        pendingSearchSync.current = false
         setStocksError(errorMessage(error))
       })
       .finally(() => {
@@ -192,24 +250,74 @@ function App() {
     const controller = new AbortController()
 
     Promise.all([
-      getStockPrices(
-        selectedStock.symbol,
-        selectedStock.exchange,
-        controller.signal,
-      ),
+      detailRequestMode === 'sync'
+        ? syncStockPrices(
+            selectedStock.symbol,
+            selectedStock.exchange,
+            appliedDateRange.fromDate,
+            appliedDateRange.toDate,
+            controller.signal,
+          )
+        : getStockPrices(
+            selectedStock.symbol,
+            selectedStock.exchange,
+            appliedDateRange.fromDate,
+            appliedDateRange.toDate,
+            controller.signal,
+          ),
       getStockSignals(
         selectedStock.symbol,
         selectedStock.exchange,
+        appliedDateRange.fromDate,
+        appliedDateRange.toDate,
         controller.signal,
       ),
     ])
       .then(([priceResponse, signalResponse]) => {
         setPrices(priceResponse.items)
         setSignals(signalResponse.items)
+        setSyncMetadata(
+          hasSyncMetadata(priceResponse) ? priceResponse.sync : null,
+        )
       })
-      .catch((error: unknown) => {
+      .catch(async (error: unknown) => {
         if (error instanceof DOMException && error.name === 'AbortError') {
           return
+        }
+        if (detailRequestMode === 'sync') {
+          try {
+            const [cachedPriceResponse, signalResponse] = await Promise.all([
+              getStockPrices(
+                selectedStock.symbol,
+                selectedStock.exchange,
+                appliedDateRange.fromDate,
+                appliedDateRange.toDate,
+                controller.signal,
+              ),
+              getStockSignals(
+                selectedStock.symbol,
+                selectedStock.exchange,
+                appliedDateRange.fromDate,
+                appliedDateRange.toDate,
+                controller.signal,
+              ),
+            ])
+            setPrices(cachedPriceResponse.items)
+            setSignals(signalResponse.items)
+            setSyncMetadata(null)
+            setSyncWarning(
+              `${errorMessage(error)} Showing cached records instead.`,
+            )
+            return
+          } catch (fallbackError: unknown) {
+            if (
+              fallbackError instanceof DOMException &&
+              fallbackError.name === 'AbortError'
+            ) {
+              return
+            }
+            error = fallbackError
+          }
         }
         setPrices([])
         setSignals([])
@@ -222,11 +330,26 @@ function App() {
       })
 
     return () => controller.abort()
-  }, [selectedStock, detailReloadToken])
+  }, [appliedDateRange, detailReloadToken, detailRequestMode, selectedStock])
 
   const submitSearch = useCallback(
     (event: FormEvent<HTMLFormElement>) => {
       event.preventDefault()
+      if (
+        !dateRange.fromDate ||
+        !dateRange.toDate ||
+        dateRange.fromDate > dateRange.toDate
+      ) {
+        setDateRangeError('Start date must not be later than end date.')
+        return
+      }
+      if (dateRange.toDate > today) {
+        setDateRangeError('End date must not be later than today.')
+        return
+      }
+      setDateRangeError(null)
+      setAppliedDateRange(dateRange)
+      pendingSearchSync.current = true
       setStocksLoading(true)
       setStocksError(null)
       setStockOffset(0)
@@ -235,7 +358,7 @@ function App() {
         setStockReloadToken((value) => value + 1)
       }
     },
-    [activeQuery, searchInput, stockOffset],
+    [activeQuery, dateRange, searchInput, stockOffset, today],
   )
 
   const latestPrice = prices.at(-1)
@@ -283,6 +406,47 @@ function App() {
               />
               <button type="submit">Search</button>
             </div>
+            <fieldset className="date-range">
+              <legend>Daily price period</legend>
+              <label htmlFor="price-from-date">
+                From
+                <input
+                  id="price-from-date"
+                  type="date"
+                  value={dateRange.fromDate}
+                  max={dateRange.toDate || today}
+                  required
+                  onChange={(event) =>
+                    setDateRange((current) => ({
+                      ...current,
+                      fromDate: event.target.value,
+                    }))
+                  }
+                />
+              </label>
+              <label htmlFor="price-to-date">
+                To
+                <input
+                  id="price-to-date"
+                  type="date"
+                  value={dateRange.toDate}
+                  min={dateRange.fromDate}
+                  max={today}
+                  required
+                  onChange={(event) =>
+                    setDateRange((current) => ({
+                      ...current,
+                      toDate: event.target.value,
+                    }))
+                  }
+                />
+              </label>
+            </fieldset>
+            {dateRangeError && (
+              <p className="date-range-error" role="alert">
+                {dateRangeError}
+              </p>
+            )}
           </form>
 
           {recentStocks.length > 0 && (
@@ -296,7 +460,7 @@ function App() {
                   <button
                     type="button"
                     key={`${stock.exchange}:${stock.symbol}`}
-                    title={`${stock.symbol} · ${stock.exchange}`}
+                    title={`${stock.symbol} / ${stock.exchange}`}
                     aria-label={`Open recent stock ${stock.name} (${stock.symbol})`}
                     onClick={() => selectStock(stock)}
                   >
@@ -416,7 +580,9 @@ function App() {
 
                 {detailLoading ? (
                   <div className="loading-state chart-loading" role="status">
-                    Loading price history and technical signals...
+                    {detailRequestMode === 'sync'
+                      ? 'Synchronizing missing price history...'
+                      : 'Loading cached price history and technical signals...'}
                   </div>
                 ) : detailError ? (
                   <div className="error-state chart-error" role="alert">
@@ -433,6 +599,11 @@ function App() {
                   </div>
                 ) : (
                   <>
+                    {syncWarning && (
+                      <div className="sync-warning" role="status">
+                        {syncWarning}
+                      </div>
+                    )}
                     <KlineChart
                       key={`${selectedStock.exchange}:${selectedStock.symbol}`}
                       prices={prices}
@@ -446,6 +617,13 @@ function App() {
                         Source: {latestPrice?.source ?? 'No price source'}
                       </span>
                       <span>Adjustment: source defined</span>
+                      {syncMetadata && (
+                        <span>
+                          {syncMetadata.cache_hit
+                            ? 'Requested period already cached'
+                            : `Fetched ${syncMetadata.fetched_ranges.length} missing range${syncMetadata.fetched_ranges.length === 1 ? '' : 's'}; cached ${syncMetadata.prices_inserted} new record${syncMetadata.prices_inserted === 1 ? '' : 's'}`}
+                        </span>
+                      )}
                     </div>
                   </>
                 )}

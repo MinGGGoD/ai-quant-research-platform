@@ -84,6 +84,16 @@ const signal = {
   explanation: 'Technical volume signal detected for research inspection.',
 }
 
+const runSignal = {
+  ...signal,
+  stock: {
+    id: 1,
+    symbol: '600519',
+    exchange: 'SSE',
+    name: 'Synthetic Alpha',
+  },
+}
+
 const scannerRun = {
   id: 'run-1',
   status: 'completed_with_warnings',
@@ -96,6 +106,27 @@ const scannerRun = {
   matched_stocks: 1,
   warning_count: 1,
   error_count: 0,
+}
+
+const scannerRunDetail = {
+  id: scannerRun.id,
+  status: scannerRun.status,
+  data_date: scannerRun.data_date,
+  universe_name: scannerRun.universe_name,
+  parameters: {
+    signals: [{ code: 'volume_spike', version: 1 }],
+    universe: 'synthetic_universe',
+  },
+  started_at: scannerRun.started_at,
+  finished_at: scannerRun.finished_at,
+  summary: {
+    total_stocks: scannerRun.total_stocks,
+    processed_stocks: scannerRun.processed_stocks,
+    matched_stocks: scannerRun.matched_stocks,
+    warning_count: scannerRun.warning_count,
+    error_count: scannerRun.error_count,
+  },
+  error_message: 'One stock had insufficient lookback history.',
 }
 
 function jsonResponse(payload: unknown, status = 200): Response {
@@ -138,6 +169,20 @@ function installSuccessfulFetch(syncStatus = 200): ReturnType<typeof vi.fn> {
         jsonResponse({
           items: [scannerRun],
           pagination: { limit: 8, offset: 0, total: 1 },
+        }),
+      )
+    }
+    if (url.pathname === '/api/v1/scanner-runs/run-1') {
+      return Promise.resolve(jsonResponse(scannerRunDetail))
+    }
+    if (url.pathname === '/api/v1/signals') {
+      return Promise.resolve(
+        jsonResponse({
+          items:
+            url.searchParams.get('scanner_run_id') === 'run-1'
+              ? [runSignal]
+              : [],
+          pagination: { limit: 200, offset: 0, total: 1 },
         }),
       )
     }
@@ -242,6 +287,40 @@ describe('App', () => {
       screen.getByText(
         /not investment recommendations or trading instructions/i,
       ),
+    ).toBeInTheDocument()
+  })
+
+  it('opens scanner-run detail and filters its matched signals', async () => {
+    installSuccessfulFetch()
+
+    render(<App />)
+
+    await screen.findByRole('heading', { name: 'Synthetic Alpha' })
+    fireEvent.click(
+      await screen.findByRole('button', {
+        name: 'Open scanner run synthetic_universe from 2026-06-12',
+      }),
+    )
+
+    const detail = screen.getByRole('region', { name: 'Scanner run detail' })
+    expect(
+      await within(detail).findByText(
+        'One stock had insufficient lookback history.',
+      ),
+    ).toBeInTheDocument()
+    expect(within(detail).getByText('synthetic_universe')).toBeInTheDocument()
+    expect(
+      within(detail).getByText('600519 / SSE - Synthetic Alpha'),
+    ).toBeInTheDocument()
+    expect(within(detail).getByText(/"volume_spike"/)).toBeInTheDocument()
+    expect(within(detail).getByText('1/1')).toBeInTheDocument()
+
+    fireEvent.change(within(detail).getByLabelText('Filter run signals'), {
+      target: { value: 'Beta' },
+    })
+
+    expect(
+      within(detail).getByText('No run signals match this filter.'),
     ).toBeInTheDocument()
   })
 

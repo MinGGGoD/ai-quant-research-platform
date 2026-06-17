@@ -46,6 +46,26 @@ export interface ScannerRun {
   error_count: number
 }
 
+export interface ScannerRunSummary {
+  total_stocks: number
+  processed_stocks: number
+  matched_stocks: number
+  warning_count: number
+  error_count: number
+}
+
+export interface ScannerRunDetail {
+  id: string
+  status: string
+  data_date: string
+  universe_name: string
+  parameters: Record<string, unknown>
+  started_at: string
+  finished_at: string | null
+  summary: ScannerRunSummary
+  error_message: string | null
+}
+
 export interface SignalDefinition {
   code: string
   version: number
@@ -56,6 +76,7 @@ export interface TechnicalSignal {
   id: string
   scanner_run_id: string
   signal_date: string
+  stock?: StockReference
   signal: SignalDefinition
   matched_values: Record<string, unknown>
   explanation: string
@@ -92,6 +113,11 @@ export interface StockPriceSyncResponse extends StockPricesResponse {
 
 export interface ScannerRunListResponse {
   items: ScannerRun[]
+  pagination: Pagination
+}
+
+export interface SignalListResponse {
+  items: TechnicalSignal[]
   pagination: Pagination
 }
 

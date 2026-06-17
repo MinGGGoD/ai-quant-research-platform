@@ -28,7 +28,8 @@ research-document retrieval extensions:
 - Persisted scanner-run lifecycle, matched evidence, warnings, and failures.
 - Pydantic API responses, pagination, symbol lookup, and structured API errors.
 - Stock search and selection, SVG daily K-line and volume charts, stored
-  technical signals, and recent scanner-run history.
+  technical signals, recent scanner-run history, and click-through scanner-run
+  detail with matched signal evidence.
 - Two-year default chart periods with user-triggered, trade-calendar-aware
   incremental synchronization and PostgreSQL caching. AShareHub is preferred
   when configured; BaoStock is the credential-free SSE/SZSE fallback.
@@ -172,7 +173,8 @@ The dashboard provides:
 - Paginated active-stock search and selection.
 - Up to 250 recent daily K-line and volume records for the selected stock.
 - Stored technical signals with deterministic matched values and explanations.
-- The eight most recent scanner runs with market dates and summary counts.
+- The eight most recent scanner runs with market dates, summary counts,
+  selected-run configuration, status, warnings/errors, and matched signals.
 - Loading, empty, backend-error, retry, and responsive narrow-screen states.
 
 The chart displays exactly the historical records returned by the API. A short

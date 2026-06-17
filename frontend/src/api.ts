@@ -1,6 +1,8 @@
 import type {
   ApiErrorPayload,
+  ScannerRunDetail,
   ScannerRunListResponse,
+  SignalListResponse,
   StockListResponse,
   StockPriceSyncResponse,
   StockPricesResponse,
@@ -139,4 +141,24 @@ export function getScannerRuns(
   signal?: AbortSignal,
 ): Promise<ScannerRunListResponse> {
   return requestJson('/api/v1/scanner-runs?limit=8', { signal })
+}
+
+export function getScannerRunDetail(
+  runId: string,
+  signal?: AbortSignal,
+): Promise<ScannerRunDetail> {
+  return requestJson(`/api/v1/scanner-runs/${encodeURIComponent(runId)}`, {
+    signal,
+  })
+}
+
+export function getSignalsForScannerRun(
+  runId: string,
+  signal?: AbortSignal,
+): Promise<SignalListResponse> {
+  const params = new URLSearchParams({
+    scanner_run_id: runId,
+    limit: '200',
+  })
+  return requestJson(`/api/v1/signals?${params}`, { signal })
 }

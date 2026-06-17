@@ -197,7 +197,8 @@
 }
 
 .search-row button,
-.error-state button {
+.error-state button,
+.secondary-action {
   border: 0;
   border-radius: 10px;
   background: var(--accent);
@@ -206,6 +207,13 @@
   font-size: 0.75rem;
   font-weight: 800;
   padding: 0 12px;
+}
+
+.secondary-action {
+  height: 32px;
+  border: 1px solid #d8e3dc;
+  background: #fff;
+  color: var(--accent);
 }
 
 .recent-stocks {
@@ -629,7 +637,8 @@
   font-size: 0.68rem;
 }
 
-.signals-panel {
+.signals-panel,
+.run-detail-panel {
   min-height: 220px;
 }
 
@@ -671,6 +680,11 @@
 .run-date {
   color: var(--muted);
   font-size: 0.66rem;
+}
+
+.signal-title .signal-stock {
+  color: #44524a;
+  font-weight: 700;
 }
 
 .signal-card p {
@@ -718,10 +732,26 @@
 .run-card {
   display: grid;
   gap: 7px;
+  width: 100%;
   padding: 13px;
   border: 1px solid #e4e3da;
   border-radius: 12px;
   background: rgba(255, 255, 255, 0.5);
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+.run-card:hover,
+.run-card:focus-visible {
+  border-color: #aac7b9;
+  background: #f3f8f4;
+}
+
+.run-card.selected {
+  border-color: #94baa8;
+  background: var(--accent-soft);
 }
 
 .run-status {
@@ -754,6 +784,129 @@
   margin-top: 5px;
   padding-top: 10px;
   border-top: 1px solid #ecebe3;
+}
+
+.run-detail-content {
+  display: grid;
+  gap: 18px;
+  margin-top: 18px;
+}
+
+.run-detail-header,
+.run-signal-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.run-detail-header h3,
+.run-signal-heading h3 {
+  margin: 8px 0 0;
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: 1.25rem;
+  font-weight: 500;
+}
+
+.run-detail-header p {
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+
+.run-id-block {
+  display: grid;
+  justify-items: end;
+  gap: 5px;
+  max-width: min(320px, 45%);
+}
+
+.run-id-block span,
+.run-parameters > span {
+  color: var(--muted);
+  font-size: 0.62rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.run-id-block code {
+  overflow-wrap: anywhere;
+  color: #425149;
+  font-size: 0.66rem;
+  text-align: right;
+}
+
+.run-detail-metrics {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 9px;
+  margin: 0;
+}
+
+.run-detail-metrics div {
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid #e5e4dc;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.62);
+}
+
+.run-detail-metrics dt {
+  color: var(--muted);
+  font-size: 0.58rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.run-detail-metrics dd {
+  margin: 6px 0 0;
+  font-size: 1rem;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+.run-parameters {
+  display: grid;
+  gap: 7px;
+}
+
+.run-parameters pre {
+  overflow: auto;
+  max-height: 210px;
+  margin: 0;
+  padding: 12px;
+  border: 1px solid #e4e3da;
+  border-radius: 10px;
+  background: #fbfbf7;
+  color: #394840;
+  font-size: 0.68rem;
+  line-height: 1.5;
+}
+
+.run-signal-filters {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(160px, 0.6fr);
+  gap: 10px;
+}
+
+.run-signal-filters label {
+  display: grid;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 0.64rem;
+  font-weight: 800;
+}
+
+.run-signal-filters input,
+.run-signal-filters select {
+  min-width: 0;
+  width: 100%;
+  padding: 9px 10px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: #fff;
+  color: var(--ink);
+  font-size: 0.72rem;
 }
 
 .loading-state,
@@ -863,6 +1016,14 @@ footer {
   .matched-values {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+
+  .run-detail-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .run-signal-filters {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 480px) {
@@ -876,6 +1037,20 @@ footer {
 
   .market-summary strong {
     font-size: 1.45rem;
+  }
+
+  .run-detail-header,
+  .run-signal-heading {
+    flex-direction: column;
+  }
+
+  .run-id-block {
+    justify-items: start;
+    max-width: 100%;
+  }
+
+  .run-id-block code {
+    text-align: left;
   }
 }
 

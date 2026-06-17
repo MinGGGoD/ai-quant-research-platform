@@ -316,9 +316,10 @@ and detected signals to the frontend.
 implemented. It includes stock search and selection, interactive SVG daily,
 weekly, and monthly K-line and volume charts, MA5 through MA60, hover
 crosshairs and readouts, selected-stock technical-signal evidence, recent
-scanner-run history, and loading, empty, error, retry, and responsive states.
-Weekly and monthly bars are derived from stored daily data; intraday data
-remains outside the current contract.
+scanner-run history, selected scanner-run detail with matched signal filtering,
+and loading, empty, error, retry, and responsive states. Weekly and monthly bars
+are derived from stored daily data; intraday data remains outside the current
+contract.
 
 ### Goal
 

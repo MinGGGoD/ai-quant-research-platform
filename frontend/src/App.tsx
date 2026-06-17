@@ -1,9 +1,11 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 
 import {
   ApiError,
+  getScannerRunDetail,
   getScannerRuns,
+  getSignalsForScannerRun,
   getStockPrices,
   getStockSignals,
   getStocks,
@@ -15,6 +17,7 @@ import type {
   DailyPrice,
   Pagination,
   ScannerRun,
+  ScannerRunDetail,
   Stock,
   StockPriceSyncMetadata,
   StockPriceSyncResponse,
@@ -95,6 +98,14 @@ function humanize(value: string): string {
   return value.replaceAll('_', ' ')
 }
 
+function formatJson(value: unknown): string {
+  try {
+    return JSON.stringify(value, null, 2) ?? '{}'
+  } catch {
+    return '{}'
+  }
+}
+
 function errorMessage(error: unknown): string {
   if (error instanceof ApiError) {
     return error.requestId
@@ -118,6 +129,12 @@ function App() {
   const [prices, setPrices] = useState<DailyPrice[]>([])
   const [signals, setSignals] = useState<TechnicalSignal[]>([])
   const [scannerRuns, setScannerRuns] = useState<ScannerRun[]>([])
+  const [selectedRunId, setSelectedRunId] = useState<string | null>(null)
+  const [selectedRunDetail, setSelectedRunDetail] =
+    useState<ScannerRunDetail | null>(null)
+  const [selectedRunSignals, setSelectedRunSignals] = useState<
+    TechnicalSignal[]
+  >([])
   const [syncMetadata, setSyncMetadata] =
     useState<StockPriceSyncMetadata | null>(null)
   const [recentStocks, setRecentStocks] = useState<Stock[]>(loadRecentStocks)
@@ -127,11 +144,15 @@ function App() {
   const [stocksLoading, setStocksLoading] = useState(true)
   const [detailLoading, setDetailLoading] = useState(false)
   const [runsLoading, setRunsLoading] = useState(true)
+  const [runDetailLoading, setRunDetailLoading] = useState(false)
   const [stocksError, setStocksError] = useState<string | null>(null)
   const [detailError, setDetailError] = useState<string | null>(null)
   const [syncWarning, setSyncWarning] = useState<string | null>(null)
   const [runsError, setRunsError] = useState<string | null>(null)
+  const [runDetailError, setRunDetailError] = useState<string | null>(null)
   const [dateRangeError, setDateRangeError] = useState<string | null>(null)
+  const [runSignalQuery, setRunSignalQuery] = useState('')
+  const [runSignalCode, setRunSignalCode] = useState('')
   const [dateRange, setDateRange] =
     useState<SelectedDateRange>(defaultDateRange)
   const [appliedDateRange, setAppliedDateRange] =
@@ -141,6 +162,7 @@ function App() {
   const [stockReloadToken, setStockReloadToken] = useState(0)
   const [detailReloadToken, setDetailReloadToken] = useState(0)
   const [runsReloadToken, setRunsReloadToken] = useState(0)
+  const [runDetailReloadToken, setRunDetailReloadToken] = useState(0)
   const pendingSearchSync = useRef(false)
   const today = localIsoDate(new Date())
 
@@ -187,6 +209,17 @@ function App() {
     },
     [rememberStock],
   )
+
+  const selectScannerRun = useCallback((runId: string) => {
+    setSelectedRunId(runId)
+    setSelectedRunDetail(null)
+    setSelectedRunSignals([])
+    setRunDetailError(null)
+    setRunDetailLoading(true)
+    setRunSignalQuery('')
+    setRunSignalCode('')
+    setRunDetailReloadToken((value) => value + 1)
+  }, [])
 
   useEffect(() => {
     const controller = new AbortController()
@@ -241,6 +274,38 @@ function App() {
 
     return () => controller.abort()
   }, [runsReloadToken])
+
+  useEffect(() => {
+    if (!selectedRunId) {
+      return
+    }
+
+    const controller = new AbortController()
+
+    Promise.all([
+      getScannerRunDetail(selectedRunId, controller.signal),
+      getSignalsForScannerRun(selectedRunId, controller.signal),
+    ])
+      .then(([runDetail, signalResponse]) => {
+        setSelectedRunDetail(runDetail)
+        setSelectedRunSignals(signalResponse.items)
+      })
+      .catch((error: unknown) => {
+        if (error instanceof DOMException && error.name === 'AbortError') {
+          return
+        }
+        setSelectedRunDetail(null)
+        setSelectedRunSignals([])
+        setRunDetailError(errorMessage(error))
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) {
+          setRunDetailLoading(false)
+        }
+      })
+
+    return () => controller.abort()
+  }, [runDetailReloadToken, selectedRunId])
 
   useEffect(() => {
     if (!selectedStock) {
@@ -360,6 +425,40 @@ function App() {
     },
     [activeQuery, dateRange, searchInput, stockOffset, today],
   )
+
+  const runSignalCodes = useMemo(
+    () =>
+      Array.from(
+        new Set(selectedRunSignals.map((signal) => signal.signal.code)),
+      ).sort(),
+    [selectedRunSignals],
+  )
+
+  const filteredRunSignals = useMemo(() => {
+    const query = runSignalQuery.trim().toLowerCase()
+    return selectedRunSignals.filter((signal) => {
+      const matchesCode = !runSignalCode || signal.signal.code === runSignalCode
+      if (!matchesCode) {
+        return false
+      }
+      if (!query) {
+        return true
+      }
+      const stockText = signal.stock
+        ? `${signal.stock.symbol} ${signal.stock.exchange} ${signal.stock.name}`
+        : ''
+      return [
+        stockText,
+        signal.signal.name,
+        signal.signal.code,
+        signal.explanation,
+        signal.signal_date,
+      ]
+        .join(' ')
+        .toLowerCase()
+        .includes(query)
+    })
+  }, [runSignalCode, runSignalQuery, selectedRunSignals])
 
   const latestPrice = prices.at(-1)
   const previousPrice = prices.at(-2)
@@ -696,6 +795,205 @@ function App() {
               </div>
             )}
           </section>
+
+          <section
+            className="panel run-detail-panel"
+            aria-labelledby="run-detail-heading"
+          >
+            <div className="panel-heading">
+              <div>
+                <p className="section-kicker">Execution detail</p>
+                <h2 id="run-detail-heading">Scanner run detail</h2>
+              </div>
+              {selectedRunId && (
+                <button
+                  className="secondary-action"
+                  type="button"
+                  onClick={() => {
+                    setSelectedRunId(null)
+                    setSelectedRunDetail(null)
+                    setSelectedRunSignals([])
+                    setRunDetailError(null)
+                    setRunDetailLoading(false)
+                    setRunSignalQuery('')
+                    setRunSignalCode('')
+                  }}
+                >
+                  Close
+                </button>
+              )}
+            </div>
+
+            {!selectedRunId ? (
+              <div className="empty-state">
+                Select a scanner run to inspect its configuration, status, and
+                matched technical signals.
+              </div>
+            ) : runDetailLoading ? (
+              <div className="loading-state" role="status">
+                Loading scanner run detail...
+              </div>
+            ) : runDetailError ? (
+              <div className="error-state" role="alert">
+                <p>{runDetailError}</p>
+                <button
+                  onClick={() => {
+                    setRunDetailLoading(true)
+                    setRunDetailError(null)
+                    setRunDetailReloadToken((value) => value + 1)
+                  }}
+                >
+                  Retry
+                </button>
+              </div>
+            ) : selectedRunDetail ? (
+              <div className="run-detail-content">
+                <div className="run-detail-header">
+                  <div>
+                    <span className={`run-status ${selectedRunDetail.status}`}>
+                      {humanize(selectedRunDetail.status)}
+                    </span>
+                    <h3>{selectedRunDetail.universe_name}</h3>
+                    <p>
+                      Market date {selectedRunDetail.data_date} - Started{' '}
+                      {formatDateTime(selectedRunDetail.started_at)}
+                    </p>
+                  </div>
+                  <div className="run-id-block">
+                    <span>Run ID</span>
+                    <code>{selectedRunDetail.id}</code>
+                  </div>
+                </div>
+
+                <dl className="run-detail-metrics">
+                  <div>
+                    <dt>Total</dt>
+                    <dd>{selectedRunDetail.summary.total_stocks}</dd>
+                  </div>
+                  <div>
+                    <dt>Processed</dt>
+                    <dd>{selectedRunDetail.summary.processed_stocks}</dd>
+                  </div>
+                  <div>
+                    <dt>Matched</dt>
+                    <dd>{selectedRunDetail.summary.matched_stocks}</dd>
+                  </div>
+                  <div>
+                    <dt>Warnings</dt>
+                    <dd>{selectedRunDetail.summary.warning_count}</dd>
+                  </div>
+                  <div>
+                    <dt>Errors</dt>
+                    <dd>{selectedRunDetail.summary.error_count}</dd>
+                  </div>
+                </dl>
+
+                {selectedRunDetail.error_message && (
+                  <div className="sync-warning" role="status">
+                    {selectedRunDetail.error_message}
+                  </div>
+                )}
+
+                <div className="run-parameters">
+                  <span>Parameters</span>
+                  <pre>{formatJson(selectedRunDetail.parameters)}</pre>
+                </div>
+
+                <div className="run-signal-heading">
+                  <div>
+                    <p className="section-kicker">Run matched signals</p>
+                    <h3>Detected signals</h3>
+                  </div>
+                  <span className="count-badge">
+                    {filteredRunSignals.length}/{selectedRunSignals.length}
+                  </span>
+                </div>
+
+                {selectedRunSignals.length > 0 && (
+                  <div className="run-signal-filters">
+                    <label htmlFor="run-signal-query">
+                      Filter run signals
+                      <input
+                        id="run-signal-query"
+                        type="search"
+                        value={runSignalQuery}
+                        placeholder="Stock, code, or explanation"
+                        onChange={(event) =>
+                          setRunSignalQuery(event.target.value)
+                        }
+                      />
+                    </label>
+                    <label htmlFor="run-signal-code">
+                      Signal type
+                      <select
+                        id="run-signal-code"
+                        value={runSignalCode}
+                        onChange={(event) =>
+                          setRunSignalCode(event.target.value)
+                        }
+                      >
+                        <option value="">All signals</option>
+                        {runSignalCodes.map((code) => (
+                          <option value={code} key={code}>
+                            {humanize(code)}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
+                )}
+
+                {selectedRunSignals.length === 0 ? (
+                  <div className="empty-state">
+                    No signals are stored for this scanner run.
+                  </div>
+                ) : filteredRunSignals.length === 0 ? (
+                  <div className="empty-state">
+                    No run signals match this filter.
+                  </div>
+                ) : (
+                  <div className="signal-list">
+                    {filteredRunSignals.map((signal) => (
+                      <article className="signal-card" key={signal.id}>
+                        <div className="signal-title">
+                          <div>
+                            <strong>{signal.signal.name}</strong>
+                            <span>
+                              {signal.signal.code} v{signal.signal.version}
+                            </span>
+                            {signal.stock && (
+                              <span className="signal-stock">
+                                {signal.stock.symbol} / {signal.stock.exchange}{' '}
+                                - {signal.stock.name}
+                              </span>
+                            )}
+                          </div>
+                          <time dateTime={signal.signal_date}>
+                            {signal.signal_date}
+                          </time>
+                        </div>
+                        <p>{signal.explanation}</p>
+                        <dl className="matched-values">
+                          {Object.entries(signal.matched_values)
+                            .slice(0, 4)
+                            .map(([key, value]) => (
+                              <div key={key}>
+                                <dt>{humanize(key)}</dt>
+                                <dd>
+                                  {typeof value === 'number'
+                                    ? formatNumber(value)
+                                    : String(value)}
+                                </dd>
+                              </div>
+                            ))}
+                        </dl>
+                      </article>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ) : null}
+          </section>
         </section>
 
         <aside className="panel runs-panel" aria-labelledby="runs-heading">
@@ -728,7 +1026,16 @@ function App() {
           ) : (
             <div className="run-list">
               {scannerRuns.map((run) => (
-                <article className="run-card" key={run.id}>
+                <button
+                  className={
+                    run.id === selectedRunId ? 'run-card selected' : 'run-card'
+                  }
+                  key={run.id}
+                  type="button"
+                  aria-label={`Open scanner run ${run.universe_name} from ${run.data_date}`}
+                  aria-pressed={run.id === selectedRunId}
+                  onClick={() => selectScannerRun(run.id)}
+                >
                   <div className="run-title">
                     <span className={`run-status ${run.status}`}>
                       {humanize(run.status)}
@@ -755,7 +1062,7 @@ function App() {
                       <dd>{run.warning_count}</dd>
                     </div>
                   </dl>
-                </article>
+                </button>
               ))}
             </div>
           )}

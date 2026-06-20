@@ -307,7 +307,10 @@ later than `to_date`.
 }
 ```
 
-The values above are illustrative.
+The values above are illustrative. When the local BaoStock front-adjusted daily
+file cache is available, the same endpoint may return cached rows with
+`price_adjustment` set to `front_adjusted` and item `source` set to
+`baostock_qfq_file_cache`. Database-backed rows retain `source_defined`.
 
 **Error cases**
 

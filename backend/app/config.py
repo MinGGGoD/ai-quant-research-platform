@@ -1,4 +1,5 @@
 from functools import lru_cache
+from pathlib import Path
 from typing import Literal
 
 from pydantic import Field, SecretStr
@@ -21,6 +22,7 @@ class Settings(BaseSettings):
     asharehub_timeout_seconds: float = Field(default=20.0, gt=0, le=120)
     asharehub_sync_max_requests: int = Field(default=20, ge=1, le=100)
     market_data_provider: Literal["auto", "asharehub", "baostock"] = "auto"
+    local_daily_cache_dir: Path = Path("data/cache/baostock/daily_qfq")
     ai_provider: Literal["disabled", "openai_compatible"] = "disabled"
     ai_base_url: str = "https://api.openai.com/v1"
     ai_api_key: SecretStr | None = None

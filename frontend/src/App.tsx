@@ -127,6 +127,7 @@ function App() {
     useState<Pagination>(EMPTY_PAGINATION)
   const [selectedStock, setSelectedStock] = useState<Stock | null>(null)
   const [prices, setPrices] = useState<DailyPrice[]>([])
+  const [priceAdjustment, setPriceAdjustment] = useState('source_defined')
   const [signals, setSignals] = useState<TechnicalSignal[]>([])
   const [scannerRuns, setScannerRuns] = useState<ScannerRun[]>([])
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null)
@@ -204,6 +205,7 @@ function App() {
       } else {
         setDetailLoading(false)
         setPrices([])
+        setPriceAdjustment('source_defined')
         setSignals([])
       }
     },
@@ -340,6 +342,7 @@ function App() {
     ])
       .then(([priceResponse, signalResponse]) => {
         setPrices(priceResponse.items)
+        setPriceAdjustment(priceResponse.price_adjustment)
         setSignals(signalResponse.items)
         setSyncMetadata(
           hasSyncMetadata(priceResponse) ? priceResponse.sync : null,
@@ -368,6 +371,7 @@ function App() {
               ),
             ])
             setPrices(cachedPriceResponse.items)
+            setPriceAdjustment(cachedPriceResponse.price_adjustment)
             setSignals(signalResponse.items)
             setSyncMetadata(null)
             setSyncWarning(
@@ -424,6 +428,14 @@ function App() {
       }
     },
     [activeQuery, dateRange, searchInput, stockOffset, today],
+  )
+
+  const openRecentStock = useCallback(
+    (stock: Stock) => {
+      setSearchInput(stock.symbol)
+      selectStock(stock)
+    },
+    [selectStock],
   )
 
   const runSignalCodes = useMemo(
@@ -561,7 +573,7 @@ function App() {
                     key={`${stock.exchange}:${stock.symbol}`}
                     title={`${stock.symbol} / ${stock.exchange}`}
                     aria-label={`Open recent stock ${stock.name} (${stock.symbol})`}
-                    onClick={() => selectStock(stock)}
+                    onClick={() => openRecentStock(stock)}
                   >
                     {stock.name}
                   </button>
@@ -715,7 +727,12 @@ function App() {
                       <span>
                         Source: {latestPrice?.source ?? 'No price source'}
                       </span>
-                      <span>Adjustment: source defined</span>
+                      <span>
+                        Adjustment:{' '}
+                        {priceAdjustment === 'front_adjusted'
+                          ? 'Front adjusted'
+                          : 'Source defined'}
+                      </span>
                       {syncMetadata && (
                         <span>
                           {syncMetadata.cache_hit

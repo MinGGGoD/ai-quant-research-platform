@@ -27,6 +27,7 @@ Thumbs.db
 
 # Local data and logs
 data/local/
+data/cache/
 *.log
 
 # Docker overrides

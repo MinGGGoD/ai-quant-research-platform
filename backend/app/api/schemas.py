@@ -61,7 +61,7 @@ class DailyPriceResponse(ApiModel):
 
 class StockPricesResponse(ApiModel):
     stock: StockReference
-    price_adjustment: Literal["source_defined"] = "source_defined"
+    price_adjustment: Literal["source_defined", "front_adjusted"] = "source_defined"
     items: list[DailyPriceResponse]
 
 

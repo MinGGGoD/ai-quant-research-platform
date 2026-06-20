@@ -446,6 +446,8 @@ describe('App', () => {
       name: 'Open recent stock Synthetic Beta (000001)',
     })
     expect(recentShortcut).toBeInTheDocument()
+    fireEvent.click(recentShortcut)
+    expect(screen.getByLabelText('Search stocks')).toHaveValue('000001')
 
     cleanup()
     render(<App />)

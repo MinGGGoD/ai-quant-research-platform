@@ -64,6 +64,11 @@ from backend.app.database import (
 )
 from backend.app.database.session import get_db_session
 from backend.app.main_constants import APP_VERSION
+from backend.app.services.local_daily_cache import (
+    LOCAL_CACHE_PRICE_ADJUSTMENT,
+    LocalCachedStock,
+    LocalDailyCache,
+)
 from backend.app.services.market_data_sync import (
     MarketDataHistoryProvider,
     MarketDataProviderUnavailableError,
@@ -233,6 +238,16 @@ MarketDataHistoryProviderDependency = Annotated[
 ]
 
 
+def configured_local_daily_cache() -> LocalDailyCache:
+    return LocalDailyCache(get_settings().local_daily_cache_dir)
+
+
+LocalDailyCacheDependency = Annotated[
+    LocalDailyCache,
+    Depends(configured_local_daily_cache),
+]
+
+
 def research_note_response(note: ResearchNote) -> ResearchNoteResponse:
     return ResearchNoteResponse(
         id=note.id,
@@ -347,7 +362,7 @@ def stock_locator(symbol: str, exchange: str | None) -> tuple[str, str | None]:
     return normalized_symbol, normalized_exchange or inferred_exchange
 
 
-def resolve_stock(
+def resolve_database_stock(
     session: Session,
     symbol: str,
     exchange: str | None,
@@ -371,6 +386,65 @@ def resolve_stock(
             message="The symbol exists on multiple exchanges; provide exchange.",
         )
     return matches[0]
+
+
+def resolve_stock(
+    session: Session,
+    local_cache: LocalDailyCache,
+    symbol: str,
+    exchange: str | None,
+) -> Stock | LocalCachedStock:
+    normalized_symbol, normalized_exchange = stock_locator(symbol, exchange)
+    database_matches = find_stocks(
+        session,
+        symbol=normalized_symbol,
+        exchange=normalized_exchange,
+    )
+    if database_matches:
+        if len(database_matches) > 1:
+            raise ApiError(
+                status_code=409,
+                code="ambiguous_stock_symbol",
+                message="The symbol exists on multiple exchanges; provide exchange.",
+            )
+        return database_matches[0]
+
+    local_matches = local_cache.find_stocks(
+        symbol=normalized_symbol,
+        exchange=normalized_exchange,
+    )
+    if not local_matches:
+        raise ApiError(
+            status_code=404,
+            code="stock_not_found",
+            message="The requested stock does not exist.",
+        )
+    if len(local_matches) > 1:
+        raise ApiError(
+            status_code=409,
+            code="ambiguous_stock_symbol",
+            message="The symbol exists on multiple exchanges; provide exchange.",
+        )
+    return local_matches[0]
+
+
+def resolve_local_cache_stock(
+    local_cache: LocalDailyCache,
+    symbol: str,
+    exchange: str | None,
+) -> LocalCachedStock | None:
+    normalized_symbol, normalized_exchange = stock_locator(symbol, exchange)
+    matches = local_cache.find_stocks(
+        symbol=normalized_symbol,
+        exchange=normalized_exchange,
+    )
+    if len(matches) > 1:
+        raise ApiError(
+            status_code=409,
+            code="ambiguous_stock_symbol",
+            message="The symbol exists on multiple exchanges; provide exchange.",
+        )
+    return matches[0] if matches else None
 
 
 def validate_signal_code(session: Session, signal_code: str | None) -> None:
@@ -406,6 +480,7 @@ def readiness(session: DatabaseSession) -> ReadinessResponse:
 )
 def get_stocks(
     session: DatabaseSession,
+    local_cache: LocalDailyCacheDependency,
     query: str | None = Query(default=None, max_length=128),
     exchange: str | None = None,
     status: str = "active",
@@ -419,17 +494,42 @@ def get_stocks(
             code="unsupported_stock_status",
             message="status must be active, suspended, or delisted.",
         )
-    stocks, total = list_stocks(
+    normalized_query = query.strip() if query and query.strip() else None
+    normalized_exchange = normalize_exchange(exchange)
+    stocks, database_total = list_stocks(
         session,
-        query=query.strip() if query and query.strip() else None,
-        exchange=normalize_exchange(exchange),
+        query=normalized_query,
+        exchange=normalized_exchange,
         status=normalized_status,
         limit=limit,
         offset=offset,
     )
+    database_keys = {
+        (exchange_value, symbol)
+        for exchange_value, symbol in session.execute(
+            select(Stock.exchange, Stock.symbol)
+        ).tuples()
+    }
+    remaining = limit - len(stocks)
+    local_offset = max(0, offset - database_total)
+    local_stocks, local_total = local_cache.list_stocks(
+        query=normalized_query,
+        exchange=normalized_exchange,
+        status=normalized_status,
+        limit=remaining,
+        offset=local_offset,
+        exclude_keys=database_keys,
+    )
+    items = [StockResponse.model_validate(stock) for stock in stocks] + [
+        StockResponse.model_validate(stock) for stock in local_stocks
+    ]
     return StockListResponse(
-        items=[StockResponse.model_validate(stock) for stock in stocks],
-        pagination=Pagination(limit=limit, offset=offset, total=total),
+        items=items,
+        pagination=Pagination(
+            limit=limit,
+            offset=offset,
+            total=database_total + local_total,
+        ),
     )
 
 
@@ -442,14 +542,29 @@ def get_stocks(
 def get_stock_prices(
     symbol: str,
     session: DatabaseSession,
+    local_cache: LocalDailyCacheDependency,
     exchange: str | None = None,
     from_date: date | None = None,
     to_date: date | None = None,
     limit: int = Query(default=250, ge=1, le=MAX_PRICE_LIMIT),
 ) -> StockPricesResponse:
     validate_date_range(from_date, to_date)
-    stock = resolve_stock(session, symbol, exchange)
-    prices = list_prices(
+    local_stock = resolve_local_cache_stock(local_cache, symbol, exchange)
+    if local_stock is not None:
+        local_prices = local_cache.list_prices(
+            local_stock,
+            from_date=from_date,
+            to_date=to_date,
+            limit=limit,
+        )
+        return StockPricesResponse(
+            stock=StockReference.model_validate(local_stock),
+            price_adjustment=LOCAL_CACHE_PRICE_ADJUSTMENT,
+            items=[DailyPriceResponse.model_validate(price) for price in local_prices],
+        )
+
+    stock = resolve_database_stock(session, symbol, exchange)
+    database_prices = list_prices(
         session,
         stock_id=stock.id,
         from_date=from_date,
@@ -458,7 +573,7 @@ def get_stock_prices(
     )
     return StockPricesResponse(
         stock=StockReference.model_validate(stock),
-        items=[DailyPriceResponse.model_validate(price) for price in prices],
+        items=[DailyPriceResponse.model_validate(price) for price in database_prices],
     )
 
 
@@ -472,11 +587,40 @@ def sync_stock_prices(
     symbol: str,
     request: StockPriceSyncRequest,
     session: DatabaseSession,
+    local_cache: LocalDailyCacheDependency,
     provider: MarketDataHistoryProviderDependency,
     exchange: str | None = None,
 ) -> StockPriceSyncResponse:
     validate_date_range(request.from_date, request.to_date)
-    stock = resolve_stock(session, symbol, exchange)
+    local_stock = resolve_local_cache_stock(local_cache, symbol, exchange)
+    if local_stock is not None:
+        local_prices = local_cache.list_prices(
+            local_stock,
+            from_date=request.from_date,
+            to_date=request.to_date,
+            limit=MAX_PRICE_LIMIT,
+        )
+        return StockPriceSyncResponse(
+            stock=StockReference.model_validate(local_stock),
+            price_adjustment=LOCAL_CACHE_PRICE_ADJUSTMENT,
+            items=[DailyPriceResponse.model_validate(price) for price in local_prices],
+            sync=StockPriceSyncMetadata(
+                requested_range=DateRangeResponse(
+                    from_date=request.from_date,
+                    to_date=request.to_date,
+                ),
+                effective_range=DateRangeResponse(
+                    from_date=request.from_date,
+                    to_date=request.to_date,
+                ),
+                cache_hit=True,
+                fetched_ranges=[],
+                prices_inserted=0,
+                prices_updated=0,
+            ),
+        )
+
+    stock = resolve_database_stock(session, symbol, exchange)
     try:
         result = sync_stock_price_history(
             session,
@@ -507,7 +651,7 @@ def sync_stock_prices(
             ),
         ) from error
 
-    prices = list_prices(
+    database_prices = list_prices(
         session,
         stock_id=stock.id,
         from_date=request.from_date,
@@ -516,7 +660,7 @@ def sync_stock_prices(
     )
     return StockPriceSyncResponse(
         stock=StockReference.model_validate(stock),
-        items=[DailyPriceResponse.model_validate(price) for price in prices],
+        items=[DailyPriceResponse.model_validate(price) for price in database_prices],
         sync=StockPriceSyncMetadata(
             requested_range=DateRangeResponse(
                 from_date=result.requested_range.start_date,
@@ -553,6 +697,7 @@ def sync_stock_prices(
 def get_stock_signals(
     symbol: str,
     session: DatabaseSession,
+    local_cache: LocalDailyCacheDependency,
     exchange: str | None = None,
     signal_code: str | None = None,
     from_date: date | None = None,
@@ -561,7 +706,17 @@ def get_stock_signals(
     offset: PageOffset = 0,
 ) -> StockSignalsResponse:
     validate_date_range(from_date, to_date)
-    stock = resolve_stock(session, symbol, exchange)
+    local_stock = resolve_local_cache_stock(local_cache, symbol, exchange)
+    try:
+        stock = resolve_database_stock(session, symbol, exchange)
+    except ApiError as error:
+        if error.code != "stock_not_found" or local_stock is None:
+            raise
+        return StockSignalsResponse(
+            stock=StockReference.model_validate(local_stock),
+            items=[],
+            pagination=Pagination(limit=limit, offset=offset, total=0),
+        )
     validate_signal_code(session, signal_code)
     rows, total = list_signals(
         session,
@@ -600,9 +755,12 @@ def get_stock_signals(
 def get_stock(
     symbol: str,
     session: DatabaseSession,
+    local_cache: LocalDailyCacheDependency,
     exchange: str | None = None,
 ) -> StockResponse:
-    return StockResponse.model_validate(resolve_stock(session, symbol, exchange))
+    return StockResponse.model_validate(
+        resolve_stock(session, local_cache, symbol, exchange)
+    )
 
 
 @resource_router.get(
@@ -741,7 +899,7 @@ def create_research_note(
     generator: ResearchNoteGeneratorDependency,
     exchange: str | None = None,
 ) -> ResearchNoteResponse:
-    stock = resolve_stock(session, symbol, exchange)
+    stock = resolve_database_stock(session, symbol, exchange)
     if (
         request.scanner_run_id is not None
         and session.get(ScannerRun, request.scanner_run_id) is None
@@ -797,7 +955,7 @@ def get_stock_research_notes(
     limit: PageLimit = 20,
     offset: PageOffset = 0,
 ) -> ResearchNoteListResponse:
-    stock = resolve_stock(session, symbol, exchange)
+    stock = resolve_database_stock(session, symbol, exchange)
     notes, total = list_research_notes(
         session,
         stock_id=stock.id,

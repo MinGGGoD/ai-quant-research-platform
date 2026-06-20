@@ -39,6 +39,7 @@ include = ["ai*", "backend*", "rag*", "scanner*"]
 
 [tool.pytest.ini_options]
 addopts = "-ra"
+pythonpath = ["."]
 testpaths = ["backend/tests", "scanner/tests", "tests"]
 markers = [
     "postgres: requires a disposable PostgreSQL database configured by TEST_DATABASE_URL",

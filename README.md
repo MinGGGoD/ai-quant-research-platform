@@ -356,6 +356,61 @@ docker compose -f deployment/compose.yaml --profile tools run --rm scanner \
   --expected-through 2026-06-13
 ```
 
+### BaoStock Front-Adjusted File Cache
+
+The project also includes a local file-cache script for research datasets that
+should stay outside the database contract. It reads the external
+`stocks.json` universe, classifies ordinary Shanghai/Shenzhen A-shares by code
+prefix, ignores BSE/B-share prefixes, and treats the remaining securities as
+`ETF/基金`.
+
+Run a dry check first:
+
+```powershell
+python scripts/cache_baostock_daily.py --dry-run --limit 5
+```
+
+Cache front-adjusted daily K-line CSV files through BaoStock:
+
+```powershell
+python scripts/cache_baostock_daily.py
+```
+
+Cache front-adjusted 30-minute K-line CSV files through BaoStock:
+
+```powershell
+python scripts/cache_baostock_daily.py --frequency 30
+```
+
+Defaults:
+
+- Stock universe: `E:\projects\chan.py\Dataset\stocks.json`
+- Output directory: `data/cache/baostock/daily_qfq/`
+- Date range: `2016-01-01` through `2026-06-19`
+- Start date per security: the later of `2016-01-01` and its `list_date`
+- Frequency: daily K-line (`d`)
+- Adjustment: front-adjusted BaoStock prices (`adjustflag=2`)
+
+Use `--frequency 30`, `--frequency 60`, `--frequency w`, or `--frequency m` to
+cache other BaoStock K-line levels. Without an explicit `--output-dir`, the
+script writes each level to its own directory, such as
+`data/cache/baostock/30m_qfq/`, so intraday files do not mix with daily files.
+Minute K-line files include BaoStock's `time` column and are deduplicated by
+`date + time`.
+
+Use `--code 600000`, `--limit 10`, or `--force` for targeted testing and
+refreshes. Long full-market runs use request retries and BaoStock session
+reconnects by default; if the provider reports network receive errors, rerun the
+same command without `--force` so completed CSV files are skipped, or increase
+`--sleep-seconds` to reduce request pressure. The generated cache directory is
+ignored by Git and must not be committed.
+
+When `data/cache/baostock/daily_qfq/` is present, the backend stock and daily
+price endpoints can read this file cache directly. Cached BaoStock prices are
+reported with `price_adjustment=front_adjusted` and source
+`baostock_qfq_file_cache`; the database-backed `daily_prices` table keeps its
+existing source-defined adjustment contract.
+
 ## Technical Signal Scanner
 
 Phase 4 provides three deterministic version 1 research signals:

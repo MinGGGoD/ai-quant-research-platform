@@ -1,0 +1,14 @@
+{
+  "files.exclude": {
+    "data/cache/**": true
+  },
+  "files.watcherExclude": {
+    "data/cache/**": true
+  },
+  "search.exclude": {
+    "data/cache/**": true
+  },
+  "python.analysis.exclude": [
+    "data/cache/**"
+  ]
+}

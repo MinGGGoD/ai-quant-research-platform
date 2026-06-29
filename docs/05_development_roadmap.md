@@ -313,13 +313,13 @@ and detected signals to the frontend.
 ## Phase 6: Frontend Dashboard
 
 **Implementation status (June 14, 2026):** The requested dashboard MVP scope is
-implemented. It includes stock search and selection, interactive SVG daily,
-weekly, and monthly K-line and volume charts, MA5 through MA60, hover
+implemented. It includes stock search and selection, interactive SVG 30-minute,
+60-minute, daily, weekly, and monthly K-line and volume charts, MA5 through MA60, hover
 crosshairs and readouts, selected-stock technical-signal evidence, recent
 scanner-run history, selected scanner-run detail with matched signal filtering,
 and loading, empty, error, retry, and responsive states. Weekly and monthly bars
-are derived from stored daily data; intraday data remains outside the current
-contract.
+are derived from stored daily data; intraday bars are read from local BaoStock
+cache files, with 60-minute bars derived from 30-minute cache data when needed.
 
 ### Goal
 

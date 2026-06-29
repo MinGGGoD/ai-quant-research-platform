@@ -171,7 +171,8 @@ npm run dev
 The dashboard provides:
 
 - Paginated active-stock search and selection.
-- Up to 250 recent daily K-line and volume records for the selected stock.
+- Daily, 30-minute, and 60-minute K-line and volume records for the selected
+  stock, subject to the configured API limits.
 - Stored technical signals with deterministic matched values and explanations.
 - The eight most recent scanner runs with market dates, summary counts,
   selected-run configuration, status, warnings/errors, and matched signals.
@@ -405,11 +406,21 @@ same command without `--force` so completed CSV files are skipped, or increase
 `--sleep-seconds` to reduce request pressure. The generated cache directory is
 ignored by Git and must not be committed.
 
-When `data/cache/baostock/daily_qfq/` is present, the backend stock and daily
-price endpoints can read this file cache directly. Cached BaoStock prices are
-reported with `price_adjustment=front_adjusted` and source
-`baostock_qfq_file_cache`; the database-backed `daily_prices` table keeps its
-existing source-defined adjustment contract.
+When `data/cache/baostock/daily_qfq/` is present, the backend stock and price
+endpoints can read this file cache directly. The same endpoint can read
+`30m_qfq/` for 30-minute bars and `60m_qfq/` for 60-minute bars; if `60m_qfq/`
+is absent, 60-minute bars are derived from paired 30-minute records. Cached
+BaoStock prices are reported with `price_adjustment=front_adjusted`; direct
+cache rows use source `baostock_qfq_file_cache`, while derived 60-minute rows
+use source `baostock_qfq_file_cache_derived_60m`. The database-backed
+`daily_prices` table keeps its existing source-defined adjustment contract.
+When the dashboard search triggers daily synchronization for a stock served
+from the local BaoStock CSV cache, the backend compares the requested period
+end date with the CSV file's latest cached date. If the request extends beyond
+the file, the backend fetches the missing tail from BaoStock with front
+adjustment and merges the new rows back into the same cache file before
+returning chart data. Deployments that enable this behavior must mount
+`data/cache` read-write for the backend container.
 
 ## Technical Signal Scanner
 
@@ -428,19 +439,22 @@ conditions only; they are not buy, sell, or investment recommendations.
 
 ## Interactive Market Chart
 
-The dashboard requests up to 1,000 stored daily bars for the selected stock.
+The dashboard requests up to 1,000 stored daily bars or 5,000 local intraday
+bars for the selected stock.
 The chart provides:
 
-- Daily, weekly, and monthly K-line levels.
+- 30-minute, 60-minute, daily, weekly, and monthly K-line levels.
 - Weekly and monthly OHLCV aggregation from stored daily records.
+- 60-minute OHLCV aggregation from cached 30-minute records when direct 60m
+  cache files are absent.
 - MA5, MA10, MA20, MA30, and MA60 overlays.
 - Dashed horizontal and vertical crosshairs on hover.
 - Hovered-date OHLC, percentage change, volume, and moving-average values.
 - A visible warning when the stored history is too short for longer indicators.
 
-The current database contract contains daily data only. `1W` and `1M` are
-transparent aggregations of those daily records; minute and other intraday
-levels are not displayed because the platform has no intraday source or schema.
+The current database contract contains daily data only. Local BaoStock cache
+files provide the displayed intraday records; they are used for research
+visualization and are not persisted into the PostgreSQL `daily_prices` table.
 
 If a chart contains only one candle, inspect the stored history and import a
 larger date range:
@@ -527,6 +541,11 @@ Synchronize only missing daily records for a bounded period:
 $body = '{"from_date":"2024-06-15","to_date":"2026-06-15"}'
 Invoke-RestMethod -Method Post -ContentType "application/json" -Body $body "http://localhost:8000/api/v1/stocks/600519/prices/sync?exchange=SSE"
 ```
+
+For stocks served from `data/cache/baostock/daily_qfq/`, the same endpoint
+refreshes the local CSV tail when `to_date` is newer than the cached file's
+latest date. If BaoStock is unavailable, the dashboard falls back to displaying
+the existing cached rows with a warning.
 
 List scanner runs and detected signals:
 

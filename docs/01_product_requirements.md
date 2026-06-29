@@ -80,8 +80,8 @@ dashboard.
 - Filter results by date, stock code or name, and signal type.
 - Provide a stock-level detail view with the values that caused each match.
 - Clearly display the market-data date and scan execution time.
-- Display stored daily K-line data with daily, weekly, and monthly research
-  views, moving averages, volume, hover inspection, and zoom/pan navigation.
+- Display stored daily K-line data and local cached 30-minute/60-minute K-line
+  data with moving averages, volume, hover inspection, and zoom/pan navigation.
 - Let the researcher choose a daily-price date range, defaulting to the past
   two years, and synchronize only missing trading sessions when searching.
 - Keep up to six recently searched or opened stocks as local browser shortcuts.

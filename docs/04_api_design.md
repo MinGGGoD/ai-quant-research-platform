@@ -251,7 +251,7 @@ The response uses the same stock object as the stock-list endpoint.
 - `409`: the local symbol is ambiguous and no exchange was supplied
 - `503`: database unavailable
 
-#### 7.2 Get Daily K-Line Data
+#### 7.2 Get K-Line Data
 
 **Method and path**
 
@@ -265,11 +265,15 @@ The response uses the same stock object as the stock-list endpoint.
 | `exchange` | Query | `string` | No | `SSE`, `SZSE`, or `BSE`; useful with a local code |
 | `from_date` | Query | `date` | No | Inclusive start trading date |
 | `to_date` | Query | `date` | No | Inclusive end trading date |
-| `limit` | Query | `integer` | No | Maximum rows from 1 to 1000; defaults to 250 |
+| `frequency` | Query | `string` | No | `daily`, `30m`, or `60m`; aliases `d`, `30`, and `60` are accepted |
+| `limit` | Query | `integer` | No | Maximum rows from 1 to 5000; defaults to 250 |
 
 If no date range is provided, return the most recent `limit` records, sorted
 chronologically in the response. If dates are provided, `from_date` must not be
-later than `to_date`.
+later than `to_date`. The database-backed contract remains daily-only; local
+BaoStock cache files provide 30-minute and 60-minute views for research
+visualization. When direct `60m_qfq/` files are unavailable, the backend derives
+60-minute bars from paired 30-minute records.
 
 **Response example: `200 OK`**
 
@@ -281,10 +285,12 @@ later than `to_date`.
     "exchange": "SSE",
     "name": "Kweichow Moutai"
   },
+  "frequency": "daily",
   "price_adjustment": "source_defined",
   "items": [
     {
       "trade_date": "2026-06-11",
+      "timestamp": null,
       "open": 1402.5,
       "high": 1418.8,
       "low": 1398.2,
@@ -295,6 +301,7 @@ later than `to_date`.
     },
     {
       "trade_date": "2026-06-12",
+      "timestamp": null,
       "open": 1410.0,
       "high": 1432.5,
       "low": 1402.1,
@@ -310,19 +317,22 @@ later than `to_date`.
 The values above are illustrative. When the local BaoStock front-adjusted daily
 file cache is available, the same endpoint may return cached rows with
 `price_adjustment` set to `front_adjusted` and item `source` set to
-`baostock_qfq_file_cache`. Database-backed rows retain `source_defined`.
+`baostock_qfq_file_cache`. Derived 60-minute rows use source
+`baostock_qfq_file_cache_derived_60m`. Intraday rows include a `timestamp`
+such as `2026-06-12T10:30:00`; daily rows return `timestamp: null`.
+Database-backed rows retain `source_defined`.
 
 **Error cases**
 
-- `400`: `from_date` is later than `to_date`, or requested range exceeds an
-  implementation-defined safety limit
+- `400`: `from_date` is later than `to_date`, unsupported `frequency`, or
+  requested range exceeds an implementation-defined safety limit
 - `404`: stock does not exist
 - `422`: malformed date or invalid limit
 - `503`: database unavailable
 
 **Frontend usage**
 
-- Use the response directly for daily candlestick and volume charts.
+- Use the response directly for daily or intraday candlestick and volume charts.
 - The frontend may aggregate ordered daily rows into calendar-week and
   calendar-month research views. It must label these as derived from daily data.
 - Calculate display-only moving averages in the browser when no shared backend
@@ -346,6 +356,13 @@ session ranges, upserts them, stores completed historical coverage, and returns
 the full cached period. In `auto` mode it uses AShareHub when configured and
 otherwise falls back to BaoStock for SSE/SZSE. The response extends the normal
 price response with:
+
+When the requested stock is served from the local BaoStock `daily_qfq` file
+cache rather than `daily_prices`, this endpoint compares `to_date` with the
+CSV file's latest cached date. If `to_date` is newer, it fetches the missing
+tail from BaoStock using front-adjusted daily bars (`adjustflag=2`), merges the
+new rows into the CSV file, and then returns the local cached price response.
+The local file-cache branch does not use database synchronization coverage.
 
 - `cache_hit`: no missing provider price range was required.
 - `fetched_ranges`: inclusive ranges requested from the configured provider.

@@ -113,24 +113,31 @@ explanations are neutral research descriptions and contain no action guidance.
    from the FastAPI backend.
 2. A stock search submits a bounded date range, defaulting to the past two
    years, to the price synchronization endpoint.
-3. The backend checks persisted synchronization coverage, the provider trade
-   calendar, and existing daily prices to identify missing trading sessions.
+3. For database-backed stocks, the backend checks persisted synchronization
+   coverage, the provider trade calendar, and existing daily prices to
+   identify missing trading sessions.
 4. Only missing session ranges are requested from the configured provider and
    transactionally upserted. `auto` mode prefers AShareHub when its key is
    configured and otherwise uses BaoStock for SSE/SZSE. Confirmed historical
    coverage is cached so suspended and closed sessions are not repeatedly
    requested; the current day remains refreshable.
-5. The backend returns stable JSON response models and synchronization metadata.
-6. The frontend renders scan status, filters, signal details, and historical
+5. For stocks served from the local BaoStock daily CSV cache, the same
+   user-triggered synchronization compares the requested end date with the
+   file's latest cached date. If the request extends beyond the file, BaoStock
+   front-adjusted daily rows are fetched and merged back into that CSV before
+   the response is returned.
+6. The backend returns stable JSON response models and synchronization metadata.
+7. The frontend renders scan status, filters, signal details, and historical
    stock charts.
 
-The chart requests a bounded daily history and performs presentation-only
-calendar aggregation for weekly and monthly views. MA5, MA10, MA20, MA30, and
-MA60 are calculated over the currently selected bar level. Hover, crosshair,
-zoom, and pan state remain local to the browser. Up to six recently searched or
-opened stocks are stored in browser local storage as navigation shortcuts.
-Intraday levels are not offered because the database and provider contract
-currently store daily bars only.
+The chart requests bounded daily history for daily, weekly, and monthly views,
+and can request local BaoStock cache bars for 30-minute and 60-minute views.
+Weekly and monthly bars are presentation-only aggregations of daily rows; when
+direct 60-minute cache files are absent, 60-minute bars are derived from paired
+30-minute cache records. MA5, MA10, MA20, MA30, and MA60 are calculated over
+the currently selected bar level. Hover, crosshair, zoom, and pan state remain
+local to the browser. Up to six recently searched or opened stocks are stored
+in browser local storage as navigation shortcuts.
 
 The database remains the integration point between the scanner and backend.
 The backend reuses validated market-data adapters for explicit user-triggered

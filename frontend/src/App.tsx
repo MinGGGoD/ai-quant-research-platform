@@ -12,10 +12,12 @@ import {
   syncStockPrices,
 } from './api'
 import './App.css'
+import type { ChartInterval } from './chartData'
 import KlineChart from './components/KlineChart'
 import type {
   DailyPrice,
   Pagination,
+  PriceFrequency,
   ScannerRun,
   ScannerRunDetail,
   Stock,
@@ -35,6 +37,20 @@ interface SelectedDateRange {
 }
 
 type DetailRequestMode = 'cache' | 'sync'
+
+function frequencyForChartInterval(interval: ChartInterval): PriceFrequency {
+  return interval === '30m' || interval === '60m' ? interval : 'daily'
+}
+
+function priceFrequencyLabel(frequency: PriceFrequency): string {
+  if (frequency === '30m') {
+    return '30-minute'
+  }
+  if (frequency === '60m') {
+    return '60-minute'
+  }
+  return 'daily'
+}
 
 function localIsoDate(value: Date): string {
   const year = value.getFullYear()
@@ -127,6 +143,7 @@ function App() {
     useState<Pagination>(EMPTY_PAGINATION)
   const [selectedStock, setSelectedStock] = useState<Stock | null>(null)
   const [prices, setPrices] = useState<DailyPrice[]>([])
+  const [chartInterval, setChartInterval] = useState<ChartInterval>('1D')
   const [priceAdjustment, setPriceAdjustment] = useState('source_defined')
   const [signals, setSignals] = useState<TechnicalSignal[]>([])
   const [scannerRuns, setScannerRuns] = useState<ScannerRun[]>([])
@@ -166,6 +183,7 @@ function App() {
   const [runDetailReloadToken, setRunDetailReloadToken] = useState(0)
   const pendingSearchSync = useRef(false)
   const today = localIsoDate(new Date())
+  const priceFrequency = frequencyForChartInterval(chartInterval)
 
   const rememberStock = useCallback((stock: Stock) => {
     setRecentStocks((current) => {
@@ -210,6 +228,22 @@ function App() {
       }
     },
     [rememberStock],
+  )
+
+  const changeChartInterval = useCallback(
+    (nextInterval: ChartInterval) => {
+      const currentFrequency = frequencyForChartInterval(chartInterval)
+      const nextFrequency = frequencyForChartInterval(nextInterval)
+      setChartInterval(nextInterval)
+      if (selectedStock && nextFrequency !== currentFrequency) {
+        setDetailLoading(true)
+        setDetailError(null)
+        setSyncWarning(null)
+        setSyncMetadata(null)
+        setDetailReloadToken((value) => value + 1)
+      }
+    },
+    [chartInterval, selectedStock],
   )
 
   const selectScannerRun = useCallback((runId: string) => {
@@ -315,9 +349,11 @@ function App() {
     }
 
     const controller = new AbortController()
+    const shouldSynchronizeDaily =
+      priceFrequency === 'daily' && detailRequestMode === 'sync'
 
     Promise.all([
-      detailRequestMode === 'sync'
+      shouldSynchronizeDaily
         ? syncStockPrices(
             selectedStock.symbol,
             selectedStock.exchange,
@@ -330,6 +366,7 @@ function App() {
             selectedStock.exchange,
             appliedDateRange.fromDate,
             appliedDateRange.toDate,
+            priceFrequency,
             controller.signal,
           ),
       getStockSignals(
@@ -352,7 +389,7 @@ function App() {
         if (error instanceof DOMException && error.name === 'AbortError') {
           return
         }
-        if (detailRequestMode === 'sync') {
+        if (shouldSynchronizeDaily) {
           try {
             const [cachedPriceResponse, signalResponse] = await Promise.all([
               getStockPrices(
@@ -360,6 +397,7 @@ function App() {
                 selectedStock.exchange,
                 appliedDateRange.fromDate,
                 appliedDateRange.toDate,
+                'daily',
                 controller.signal,
               ),
               getStockSignals(
@@ -399,7 +437,13 @@ function App() {
       })
 
     return () => controller.abort()
-  }, [appliedDateRange, detailReloadToken, detailRequestMode, selectedStock])
+  }, [
+    appliedDateRange,
+    detailReloadToken,
+    detailRequestMode,
+    priceFrequency,
+    selectedStock,
+  ])
 
   const submitSearch = useCallback(
     (event: FormEvent<HTMLFormElement>) => {
@@ -518,7 +562,7 @@ function App() {
               <button type="submit">Search</button>
             </div>
             <fieldset className="date-range">
-              <legend>Daily price period</legend>
+              <legend>Price period</legend>
               <label htmlFor="price-from-date">
                 From
                 <input
@@ -691,9 +735,11 @@ function App() {
 
                 {detailLoading ? (
                   <div className="loading-state chart-loading" role="status">
-                    {detailRequestMode === 'sync'
-                      ? 'Synchronizing missing price history...'
-                      : 'Loading cached price history and technical signals...'}
+                    {priceFrequency !== 'daily'
+                      ? `Loading ${priceFrequencyLabel(priceFrequency)} price history...`
+                      : detailRequestMode === 'sync'
+                        ? 'Synchronizing missing price history...'
+                        : 'Loading cached price history and technical signals...'}
                   </div>
                 ) : detailError ? (
                   <div className="error-state chart-error" role="alert">
@@ -718,10 +764,13 @@ function App() {
                     <KlineChart
                       key={`${selectedStock.exchange}:${selectedStock.symbol}`}
                       prices={prices}
+                      interval={chartInterval}
+                      onIntervalChange={changeChartInterval}
                     />
                     <div className="chart-footer">
                       <span>
-                        {prices.length} stored daily record
+                        {prices.length} stored {priceFrequencyLabel(priceFrequency)}{' '}
+                        record
                         {prices.length === 1 ? '' : 's'}
                       </span>
                       <span>
@@ -746,7 +795,7 @@ function App() {
               </>
             ) : (
               <div className="empty-state chart-empty">
-                Select a stock to inspect its daily price history.
+                Select a stock to inspect its price history.
               </div>
             )}
           </section>

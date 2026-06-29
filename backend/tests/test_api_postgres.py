@@ -335,6 +335,7 @@ def test_stock_prices_are_chronological_and_filterable(
 
     assert response.status_code == 200
     payload = response.json()
+    assert payload["frequency"] == "daily"
     assert payload["price_adjustment"] == "source_defined"
     assert [item["trade_date"] for item in payload["items"]] == [
         "2026-06-11",
@@ -408,6 +409,10 @@ def test_api_error_shapes(
         },
     )
     missing = request("/api/v1/stocks/999999")
+    invalid_frequency = request(
+        "/api/v1/stocks/600519/prices",
+        params={"exchange": "SSE", "frequency": "tick"},
+    )
     invalid_page = request("/api/v1/stocks", params={"limit": 0})
     unknown_signal = request(
         "/api/v1/signals",
@@ -418,6 +423,8 @@ def test_api_error_shapes(
     assert invalid_range.json()["error"]["code"] == "invalid_date_range"
     assert missing.status_code == 404
     assert missing.json()["error"]["code"] == "stock_not_found"
+    assert invalid_frequency.status_code == 400
+    assert invalid_frequency.json()["error"]["code"] == "unsupported_price_frequency"
     assert invalid_page.status_code == 422
     assert invalid_page.json()["error"]["code"] == "validation_error"
     assert unknown_signal.status_code == 400

@@ -211,6 +211,7 @@ function installSuccessfulFetch(syncStatus = 200): ReturnType<typeof vi.fn> {
       return Promise.resolve(
         jsonResponse({
           stock: stocks.find((stock) => stock.symbol === symbol),
+          frequency: 'daily',
           price_adjustment: 'source_defined',
           items: pricesBySymbol[symbol],
           sync: {
@@ -228,11 +229,23 @@ function installSuccessfulFetch(syncStatus = 200): ReturnType<typeof vi.fn> {
       const symbol = url.pathname
         .split('/')
         .at(-2) as keyof typeof pricesBySymbol
+      const frequency = url.searchParams.get('frequency') ?? 'daily'
+      const items =
+        frequency === '30m' || frequency === '60m'
+          ? pricesBySymbol[symbol].map((price, index) => ({
+              ...price,
+              timestamp: `${price.trade_date}T${String(10 + index).padStart(
+                2,
+                '0',
+              )}:00:00`,
+            }))
+          : pricesBySymbol[symbol]
       return Promise.resolve(
         jsonResponse({
           stock: stocks.find((stock) => stock.symbol === symbol),
+          frequency,
           price_adjustment: 'source_defined',
-          items: pricesBySymbol[symbol],
+          items,
         }),
       )
     }
@@ -352,6 +365,30 @@ describe('App', () => {
     expect(
       screen.getByRole('img', {
         name: 'Monthly K-line chart with 1 price records',
+      }),
+    ).toBeInTheDocument()
+  })
+
+  it('requests cached intraday prices when switching to 30-minute bars', async () => {
+    const fetchMock = installSuccessfulFetch()
+    render(<App />)
+
+    await screen.findByRole('img', {
+      name: 'Daily K-line chart with 2 price records',
+    })
+    fireEvent.click(screen.getByRole('button', { name: '30m' }))
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        expect.stringContaining('frequency=30m'),
+        expect.objectContaining({
+          headers: { Accept: 'application/json' },
+        }),
+      )
+    })
+    expect(
+      await screen.findByRole('img', {
+        name: '30-minute K-line chart with 2 price records',
       }),
     ).toBeInTheDocument()
   })

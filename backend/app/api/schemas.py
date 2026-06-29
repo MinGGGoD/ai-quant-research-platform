@@ -50,6 +50,7 @@ class StockListResponse(ApiModel):
 
 class DailyPriceResponse(ApiModel):
     trade_date: date
+    timestamp: datetime | None = None
     open: float
     high: float
     low: float
@@ -61,6 +62,7 @@ class DailyPriceResponse(ApiModel):
 
 class StockPricesResponse(ApiModel):
     stock: StockReference
+    frequency: Literal["daily", "30m", "60m"] = "daily"
     price_adjustment: Literal["source_defined", "front_adjusted"] = "source_defined"
     items: list[DailyPriceResponse]
 

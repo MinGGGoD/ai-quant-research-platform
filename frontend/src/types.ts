@@ -21,8 +21,11 @@ export interface StockReference {
   name: string
 }
 
+export type PriceFrequency = 'daily' | '30m' | '60m'
+
 export interface DailyPrice {
   trade_date: string
+  timestamp?: string | null
   open: number
   high: number
   low: number
@@ -89,6 +92,7 @@ export interface StockListResponse {
 
 export interface StockPricesResponse {
   stock: StockReference
+  frequency: PriceFrequency
   price_adjustment: string
   items: DailyPrice[]
 }

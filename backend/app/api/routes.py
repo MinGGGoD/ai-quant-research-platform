@@ -68,6 +68,11 @@ from backend.app.services.local_daily_cache import (
     LOCAL_CACHE_PRICE_ADJUSTMENT,
     LocalCachedStock,
     LocalDailyCache,
+    PriceFrequency,
+)
+from backend.app.services.local_daily_cache_sync import (
+    LocalDailyCacheSyncError,
+    LocalDailyCacheSynchronizer,
 )
 from backend.app.services.market_data_sync import (
     MarketDataHistoryProvider,
@@ -106,7 +111,17 @@ from scanner.ingestion import (
 DEFAULT_LIMIT = 50
 MAX_LIMIT = 200
 MAX_PRICE_LIMIT = 1000
+MAX_INTRADAY_PRICE_LIMIT = 5000
 VALID_EXCHANGES = {"SSE", "SZSE", "BSE"}
+PRICE_FREQUENCY_ALIASES: dict[str, PriceFrequency] = {
+    "daily": "daily",
+    "d": "daily",
+    "1d": "daily",
+    "30": "30m",
+    "30m": "30m",
+    "60": "60m",
+    "60m": "60m",
+}
 VALID_STOCK_STATUSES = {"active", "suspended", "delisted"}
 VALID_RUN_STATUSES = {
     "pending",
@@ -248,6 +263,16 @@ LocalDailyCacheDependency = Annotated[
 ]
 
 
+def configured_local_daily_cache_synchronizer() -> LocalDailyCacheSynchronizer:
+    return LocalDailyCacheSynchronizer()
+
+
+LocalDailyCacheSynchronizerDependency = Annotated[
+    LocalDailyCacheSynchronizer,
+    Depends(configured_local_daily_cache_synchronizer),
+]
+
+
 def research_note_response(note: ResearchNote) -> ResearchNoteResponse:
     return ResearchNoteResponse(
         id=note.id,
@@ -326,6 +351,18 @@ def normalize_exchange(exchange: str | None) -> str | None:
             message="exchange must be SSE, SZSE, or BSE.",
         )
     return normalized
+
+
+def normalize_price_frequency(frequency: str) -> PriceFrequency:
+    normalized = frequency.strip().lower()
+    price_frequency = PRICE_FREQUENCY_ALIASES.get(normalized)
+    if price_frequency is None:
+        raise ApiError(
+            status_code=400,
+            code="unsupported_price_frequency",
+            message="frequency must be daily, 30m, or 60m.",
+        )
+    return price_frequency
 
 
 def stock_locator(symbol: str, exchange: str | None) -> tuple[str, str | None]:
@@ -546,9 +583,11 @@ def get_stock_prices(
     exchange: str | None = None,
     from_date: date | None = None,
     to_date: date | None = None,
-    limit: int = Query(default=250, ge=1, le=MAX_PRICE_LIMIT),
+    limit: int = Query(default=250, ge=1, le=MAX_INTRADAY_PRICE_LIMIT),
+    frequency: str = "daily",
 ) -> StockPricesResponse:
     validate_date_range(from_date, to_date)
+    price_frequency = normalize_price_frequency(frequency)
     local_stock = resolve_local_cache_stock(local_cache, symbol, exchange)
     if local_stock is not None:
         local_prices = local_cache.list_prices(
@@ -556,14 +595,25 @@ def get_stock_prices(
             from_date=from_date,
             to_date=to_date,
             limit=limit,
+            frequency=price_frequency,
         )
         return StockPricesResponse(
             stock=StockReference.model_validate(local_stock),
+            frequency=price_frequency,
             price_adjustment=LOCAL_CACHE_PRICE_ADJUSTMENT,
             items=[DailyPriceResponse.model_validate(price) for price in local_prices],
         )
 
     stock = resolve_database_stock(session, symbol, exchange)
+    if price_frequency != "daily":
+        raise ApiError(
+            status_code=404,
+            code="price_history_not_found",
+            message=(
+                "The requested intraday price history is not available in the "
+                "local BaoStock cache."
+            ),
+        )
     database_prices = list_prices(
         session,
         stock_id=stock.id,
@@ -573,6 +623,7 @@ def get_stock_prices(
     )
     return StockPricesResponse(
         stock=StockReference.model_validate(stock),
+        frequency=price_frequency,
         items=[DailyPriceResponse.model_validate(price) for price in database_prices],
     )
 
@@ -588,12 +639,36 @@ def sync_stock_prices(
     request: StockPriceSyncRequest,
     session: DatabaseSession,
     local_cache: LocalDailyCacheDependency,
+    local_cache_synchronizer: LocalDailyCacheSynchronizerDependency,
     provider: MarketDataHistoryProviderDependency,
     exchange: str | None = None,
 ) -> StockPriceSyncResponse:
     validate_date_range(request.from_date, request.to_date)
     local_stock = resolve_local_cache_stock(local_cache, symbol, exchange)
     if local_stock is not None:
+        try:
+            local_result = local_cache_synchronizer.sync_daily_prices(
+                local_cache,
+                local_stock,
+                from_date=request.from_date,
+                to_date=request.to_date,
+            )
+        except ValueError as error:
+            raise ApiError(
+                status_code=400,
+                code="invalid_price_sync_range",
+                message=str(error),
+            ) from error
+        except LocalDailyCacheSyncError as error:
+            raise ApiError(
+                status_code=502,
+                code="market_data_provider_error",
+                message=(
+                    "The BaoStock provider could not refresh the local "
+                    "daily price cache."
+                ),
+            ) from error
+
         local_prices = local_cache.list_prices(
             local_stock,
             from_date=request.from_date,
@@ -602,27 +677,38 @@ def sync_stock_prices(
         )
         return StockPriceSyncResponse(
             stock=StockReference.model_validate(local_stock),
+            frequency="daily",
             price_adjustment=LOCAL_CACHE_PRICE_ADJUSTMENT,
             items=[DailyPriceResponse.model_validate(price) for price in local_prices],
             sync=StockPriceSyncMetadata(
                 requested_range=DateRangeResponse(
-                    from_date=request.from_date,
-                    to_date=request.to_date,
+                    from_date=local_result.requested_range.start_date,
+                    to_date=local_result.requested_range.end_date,
                 ),
-                effective_range=DateRangeResponse(
-                    from_date=request.from_date,
-                    to_date=request.to_date,
+                effective_range=(
+                    DateRangeResponse(
+                        from_date=local_result.effective_range.start_date,
+                        to_date=local_result.effective_range.end_date,
+                    )
+                    if local_result.effective_range
+                    else None
                 ),
-                cache_hit=True,
-                fetched_ranges=[],
-                prices_inserted=0,
-                prices_updated=0,
+                cache_hit=local_result.cache_hit,
+                fetched_ranges=[
+                    DateRangeResponse(
+                        from_date=item.start_date,
+                        to_date=item.end_date,
+                    )
+                    for item in local_result.fetched_ranges
+                ],
+                prices_inserted=local_result.prices_inserted,
+                prices_updated=local_result.prices_updated,
             ),
         )
 
     stock = resolve_database_stock(session, symbol, exchange)
     try:
-        result = sync_stock_price_history(
+        database_result = sync_stock_price_history(
             session,
             stock=stock,
             from_date=request.from_date,
@@ -660,30 +746,31 @@ def sync_stock_prices(
     )
     return StockPriceSyncResponse(
         stock=StockReference.model_validate(stock),
+        frequency="daily",
         items=[DailyPriceResponse.model_validate(price) for price in database_prices],
         sync=StockPriceSyncMetadata(
             requested_range=DateRangeResponse(
-                from_date=result.requested_range.start_date,
-                to_date=result.requested_range.end_date,
+                from_date=database_result.requested_range.start_date,
+                to_date=database_result.requested_range.end_date,
             ),
             effective_range=(
                 DateRangeResponse(
-                    from_date=result.effective_range.start_date,
-                    to_date=result.effective_range.end_date,
+                    from_date=database_result.effective_range.start_date,
+                    to_date=database_result.effective_range.end_date,
                 )
-                if result.effective_range
+                if database_result.effective_range
                 else None
             ),
-            cache_hit=result.cache_hit,
+            cache_hit=database_result.cache_hit,
             fetched_ranges=[
                 DateRangeResponse(
                     from_date=item.start_date,
                     to_date=item.end_date,
                 )
-                for item in result.fetched_ranges
+                for item in database_result.fetched_ranges
             ],
-            prices_inserted=result.prices_inserted,
-            prices_updated=result.prices_updated,
+            prices_inserted=database_result.prices_inserted,
+            prices_updated=database_result.prices_updated,
         ),
     )
 

@@ -56,7 +56,7 @@ services:
     ports:
       - "${AQR_BACKEND_PORT:-8000}:8000"
     volumes:
-      - ../data/cache:/app/data/cache:ro
+      - ../data/cache:/app/data/cache
     depends_on:
       postgres:
         condition: service_healthy

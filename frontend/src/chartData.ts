@@ -1,6 +1,6 @@
 import type { DailyPrice } from './types'
 
-export type ChartInterval = '1D' | '1W' | '1M'
+export type ChartInterval = '30m' | '60m' | '1D' | '1W' | '1M'
 
 export const MOVING_AVERAGE_PERIODS = [5, 10, 20, 30, 60] as const
 
@@ -25,8 +25,12 @@ function formatDate(value: Date): string {
   return value.toISOString().slice(0, 10)
 }
 
+function sortKey(price: DailyPrice): string {
+  return price.timestamp ?? `${price.trade_date}T00:00:00`
+}
+
 function intervalStart(tradeDate: string, interval: ChartInterval): string {
-  if (interval === '1D') {
+  if (interval === '30m' || interval === '60m' || interval === '1D') {
     return tradeDate
   }
   if (interval === '1M') {
@@ -68,12 +72,12 @@ export function aggregatePrices(
   interval: ChartInterval,
 ): ChartBar[] {
   const ordered = [...prices].sort((left, right) =>
-    left.trade_date.localeCompare(right.trade_date),
+    sortKey(left).localeCompare(sortKey(right)),
   )
-  if (interval === '1D') {
+  if (interval === '30m' || interval === '60m' || interval === '1D') {
     return ordered.map((price) => ({
       ...price,
-      interval_start: price.trade_date,
+      interval_start: interval === '1D' ? price.trade_date : sortKey(price),
     }))
   }
 

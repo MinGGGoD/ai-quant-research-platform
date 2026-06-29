@@ -15,6 +15,8 @@ import type { DailyPrice } from '../types'
 
 interface KlineChartProps {
   prices: DailyPrice[]
+  interval: ChartInterval
+  onIntervalChange: (interval: ChartInterval) => void
 }
 
 interface Crosshair {
@@ -44,10 +46,13 @@ const LEFT_PADDING = 24
 const RIGHT_PADDING = 76
 const MIN_VISIBLE_BARS = 10
 const INTERVAL_LABELS: Record<ChartInterval, string> = {
+  '30m': '30-minute',
+  '60m': '60-minute',
   '1D': 'Daily',
   '1W': 'Weekly',
   '1M': 'Monthly',
 }
+const CHART_INTERVALS = ['30m', '60m', '1D', '1W', '1M'] as const
 const MA_COLORS: Record<MovingAveragePeriod, string> = {
   5: '#d97706',
   10: '#db2777',
@@ -65,6 +70,12 @@ function formatCompact(value: number): string {
 
 function formatPrice(value: number | null): string {
   return value === null ? '--' : value.toFixed(2)
+}
+
+function formatBarLabel(point: DailyPrice): string {
+  return point.timestamp
+    ? point.timestamp.replace('T', ' ').slice(0, 16)
+    : point.trade_date
 }
 
 function movingAveragePath(
@@ -87,8 +98,11 @@ function movingAveragePath(
   return path.trim()
 }
 
-function PopulatedKlineChart({ prices }: KlineChartProps) {
-  const [interval, setInterval] = useState<ChartInterval>('1D')
+function PopulatedKlineChart({
+  prices,
+  interval,
+  onIntervalChange,
+}: KlineChartProps) {
   const [crosshair, setCrosshair] = useState<Crosshair | null>(null)
   const [viewportState, setViewportState] = useState<Viewport>({
     key: '',
@@ -161,10 +175,13 @@ function PopulatedKlineChart({ prices }: KlineChartProps) {
       ),
     ),
   )
-  const activePoint = points[crosshair?.index ?? points.length - 1]
+  const activeIndex = Math.max(
+    0,
+    Math.min(points.length - 1, crosshair?.index ?? points.length - 1),
+  )
+  const activePoint = points[activeIndex]
   const activeBar = activePoint.bar
-  const previousBar =
-    points[Math.max(0, (crosshair?.index ?? points.length - 1) - 1)]?.bar
+  const previousBar = points[Math.max(0, activeIndex - 1)]?.bar
   const change = previousBar ? activeBar.close - previousBar.close : 0
   const changePercent =
     previousBar && previousBar.close !== 0
@@ -317,12 +334,12 @@ function PopulatedKlineChart({ prices }: KlineChartProps) {
           role="group"
           aria-label="K-line interval"
         >
-          {(['1D', '1W', '1M'] as const).map((value) => (
+          {CHART_INTERVALS.map((value) => (
             <button
               className={interval === value ? 'active' : ''}
               key={value}
               onClick={() => {
-                setInterval(value)
+                onIntervalChange(value)
                 setCrosshair(null)
                 setViewportState({
                   key: '',
@@ -340,7 +357,7 @@ function PopulatedKlineChart({ prices }: KlineChartProps) {
         </div>
         <div className="chart-tools">
           <span className="chart-mode-note">
-            {INTERVAL_LABELS[interval]} bars · {points.length}/
+            {INTERVAL_LABELS[interval]} bars | {points.length}/
             {allPoints.length} visible
           </span>
           <div
@@ -377,16 +394,17 @@ function PopulatedKlineChart({ prices }: KlineChartProps) {
 
       {prices.length < 60 && (
         <div className="history-notice" role="note">
-          Only {prices.length} stored daily record
+          Only {prices.length} stored {INTERVAL_LABELS[interval].toLowerCase()}{' '}
+          record
           {prices.length === 1 ? '' : 's'}. Import more history to populate
-          longer moving averages and meaningful weekly or monthly views.
+          longer moving averages and meaningful higher-level views.
         </div>
       )}
 
       <div className="chart-wrap">
         <div className="chart-legend" aria-live="polite">
           <div className="ohlc-line">
-            <strong>{activeBar.trade_date}</strong>
+            <strong>{formatBarLabel(activeBar)}</strong>
             <span>O {formatPrice(activeBar.open)}</span>
             <span>H {formatPrice(activeBar.high)}</span>
             <span>L {formatPrice(activeBar.low)}</span>
@@ -537,15 +555,15 @@ function PopulatedKlineChart({ prices }: KlineChartProps) {
                     : 'middle'
               }
             >
-              {points[index].bar.trade_date}
+              {formatBarLabel(points[index].bar)}
             </text>
           ))}
 
           {crosshair && (
             <g className="crosshair" aria-hidden="true">
               <line
-                x1={xForIndex(crosshair.index)}
-                x2={xForIndex(crosshair.index)}
+                x1={xForIndex(activeIndex)}
+                x2={xForIndex(activeIndex)}
                 y1={CHART_TOP}
                 y2={VOLUME_BOTTOM}
               />
@@ -577,7 +595,7 @@ function PopulatedKlineChart({ prices }: KlineChartProps) {
                   LEFT_PADDING,
                   Math.min(
                     WIDTH - RIGHT_PADDING - 84,
-                    xForIndex(crosshair.index) - 42,
+                    xForIndex(activeIndex) - 42,
                   ),
                 )}
                 y={VOLUME_BOTTOM + 8}
@@ -590,13 +608,13 @@ function PopulatedKlineChart({ prices }: KlineChartProps) {
                   LEFT_PADDING + 42,
                   Math.min(
                     WIDTH - RIGHT_PADDING - 42,
-                    xForIndex(crosshair.index),
+                    xForIndex(activeIndex),
                   ),
                 )}
                 y={VOLUME_BOTTOM + 23}
                 textAnchor="middle"
               >
-                {activeBar.trade_date}
+                {formatBarLabel(activeBar)}
               </text>
             </g>
           )}
@@ -606,16 +624,23 @@ function PopulatedKlineChart({ prices }: KlineChartProps) {
   )
 }
 
-function KlineChart({ prices }: KlineChartProps) {
+function KlineChart({ prices, interval, onIntervalChange }: KlineChartProps) {
   if (prices.length === 0) {
     return (
       <div className="empty-state chart-empty">
-        No daily price records are available for this stock.
+        No {INTERVAL_LABELS[interval].toLowerCase()} price records are available
+        for this stock.
       </div>
     )
   }
 
-  return <PopulatedKlineChart prices={prices} />
+  return (
+    <PopulatedKlineChart
+      prices={prices}
+      interval={interval}
+      onIntervalChange={onIntervalChange}
+    />
+  )
 }
 
 export default KlineChart

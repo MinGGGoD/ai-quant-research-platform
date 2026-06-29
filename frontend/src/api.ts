@@ -1,5 +1,6 @@
 import type {
   ApiErrorPayload,
+  PriceFrequency,
   ScannerRunDetail,
   ScannerRunListResponse,
   SignalListResponse,
@@ -59,11 +60,15 @@ function stockResourcePath(
   limit: number,
   fromDate?: string,
   toDate?: string,
+  frequency?: PriceFrequency,
 ): string {
   const params = new URLSearchParams({
     exchange,
     limit: String(limit),
   })
+  if (resource === 'prices' && frequency) {
+    params.set('frequency', frequency)
+  }
   if (fromDate) {
     params.set('from_date', fromDate)
   }
@@ -94,10 +99,20 @@ export function getStockPrices(
   exchange: string,
   fromDate: string,
   toDate: string,
+  frequency: PriceFrequency = 'daily',
   signal?: AbortSignal,
 ): Promise<StockPricesResponse> {
+  const limit = frequency === 'daily' ? 1000 : 5000
   return requestJson(
-    stockResourcePath(symbol, exchange, 'prices', 1000, fromDate, toDate),
+    stockResourcePath(
+      symbol,
+      exchange,
+      'prices',
+      limit,
+      fromDate,
+      toDate,
+      frequency,
+    ),
     { signal },
   )
 }

@@ -47,6 +47,28 @@ describe('chart data', () => {
     expect(weekly[1].interval_start).toBe('2026-06-15')
   })
 
+  it('orders intraday prices by timestamp', () => {
+    const bars = aggregatePrices(
+      [
+        {
+          ...price('2026-06-15', 10.5, 11, 10, 10.8),
+          timestamp: '2026-06-15T10:30:00',
+        },
+        {
+          ...price('2026-06-15', 10, 10.6, 9.9, 10.5),
+          timestamp: '2026-06-15T10:00:00',
+        },
+      ],
+      '30m',
+    )
+
+    expect(bars.map((bar) => bar.interval_start)).toEqual([
+      '2026-06-15T10:00:00',
+      '2026-06-15T10:30:00',
+    ])
+  })
+
+
   it('aggregates daily prices into calendar months', () => {
     const monthly = aggregatePrices(
       [

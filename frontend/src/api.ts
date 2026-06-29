@@ -1,5 +1,6 @@
 import type {
   ApiErrorPayload,
+  ChanAnalysis,
   PriceFrequency,
   ScannerRunDetail,
   ScannerRunListResponse,
@@ -148,6 +149,27 @@ export function getStockSignals(
 ): Promise<StockSignalsResponse> {
   return requestJson(
     stockResourcePath(symbol, exchange, 'signals', 50, fromDate, toDate),
+    { signal },
+  )
+}
+
+export function getStockChanAnalysis(
+  symbol: string,
+  exchange: string,
+  fromDate: string,
+  toDate: string,
+  frequency: PriceFrequency = 'daily',
+  signal?: AbortSignal,
+): Promise<ChanAnalysis> {
+  const params = new URLSearchParams({
+    exchange,
+    frequency,
+    from_date: fromDate,
+    to_date: toDate,
+    limit: frequency === 'daily' ? '1000' : '5000',
+  })
+  return requestJson(
+    `/api/v1/stocks/${encodeURIComponent(symbol)}/chan-analysis?${params}`,
     { signal },
   )
 }

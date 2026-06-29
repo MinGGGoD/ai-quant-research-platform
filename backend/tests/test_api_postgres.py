@@ -346,6 +346,30 @@ def test_stock_prices_are_chronological_and_filterable(
 
 
 @pytest.mark.postgres
+def test_stock_chan_analysis_endpoint(
+    api_session_factory: sessionmaker[Session],
+) -> None:
+    del api_session_factory
+
+    response = request(
+        "/api/v1/stocks/600519/chan-analysis",
+        params={
+            "exchange": "SSE",
+            "from_date": "2026-06-11",
+            "to_date": "2026-06-12",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["frequency"] == "daily"
+    assert payload["algorithm"]["code"] == "vespa314_chan_py"
+    assert payload["price_bar_count"] == 2
+    assert payload["fractals"] == []
+    assert payload["observations"] == []
+
+
+@pytest.mark.postgres
 def test_scanner_run_endpoints(
     api_session_factory: sessionmaker[Session],
 ) -> None:

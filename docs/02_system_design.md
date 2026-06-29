@@ -127,8 +127,8 @@ explanations are neutral research descriptions and contain no action guidance.
    front-adjusted daily rows are fetched and merged back into that CSV before
    the response is returned.
 6. The backend returns stable JSON response models and synchronization metadata.
-7. The frontend renders scan status, filters, signal details, and historical
-   stock charts.
+7. The frontend renders scan status, filters, signal details, historical stock
+   charts, and optional Chan-theory chart overlays.
 
 The chart requests bounded daily history for daily, weekly, and monthly views,
 and can request local BaoStock cache bars for 30-minute and 60-minute views.
@@ -138,6 +138,12 @@ direct 60-minute cache files are absent, 60-minute bars are derived from paired
 the currently selected bar level. Hover, crosshair, zoom, and pan state remain
 local to the browser. Up to six recently searched or opened stocks are stored
 in browser local storage as navigation shortcuts.
+
+The Chan-theory overlay service is a read-only, versioned structural analysis
+over the same bounded chart data. Its calculation is delegated to the vendored
+MIT-licensed Vespa314/chan.py engine, then adapted into API-friendly fractals,
+strokes, segments, centers, and morphological buy/sell point research labels for
+visual inspection only; these labels are not trading instructions.
 
 The database remains the integration point between the scanner and backend.
 The backend reuses validated market-data adapters for explicit user-triggered

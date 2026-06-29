@@ -115,6 +115,84 @@ export interface StockPriceSyncResponse extends StockPricesResponse {
   sync: StockPriceSyncMetadata
 }
 
+export interface ChanAlgorithm {
+  code: string
+  version: number
+  parameters: Record<string, unknown>
+}
+
+export type ChanStatus = 'confirmed' | 'provisional'
+export type ChanDirection = 'up' | 'down' | 'neutral'
+
+export interface ChanFractal {
+  index: number
+  bar_time: string
+  trade_date: string
+  timestamp?: string | null
+  kind: 'top' | 'bottom'
+  price: number
+  status: ChanStatus
+}
+
+export interface ChanStroke {
+  start_index: number
+  end_index: number
+  start_time: string
+  end_time: string
+  direction: ChanDirection
+  price_low: number
+  price_high: number
+  status: ChanStatus
+}
+
+export interface ChanSegment {
+  start_index: number
+  end_index: number
+  start_time: string
+  end_time: string
+  direction: ChanDirection
+  price_low: number
+  price_high: number
+  status: ChanStatus
+  stroke_indexes: number[]
+}
+
+export interface ChanCenter {
+  start_index: number
+  end_index: number
+  start_time: string
+  end_time: string
+  price_low: number
+  price_high: number
+  status: ChanStatus
+  stroke_indexes: number[]
+}
+
+export interface ChanObservation {
+  index: number
+  bar_time: string
+  trade_date: string
+  timestamp?: string | null
+  kind: string
+  side: 'buy' | 'sell'
+  label: string
+  price: number
+  status: ChanStatus
+  explanation: string
+}
+
+export interface ChanAnalysis {
+  stock: StockReference
+  frequency: PriceFrequency
+  algorithm: ChanAlgorithm
+  price_bar_count: number
+  fractals: ChanFractal[]
+  strokes: ChanStroke[]
+  segments: ChanSegment[]
+  centers: ChanCenter[]
+  observations: ChanObservation[]
+}
+
 export interface ScannerRunListResponse {
   items: ScannerRun[]
   pagination: Pagination

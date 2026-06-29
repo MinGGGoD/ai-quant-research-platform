@@ -10,6 +10,7 @@ COPY ai ./ai
 COPY backend ./backend
 COPY rag ./rag
 COPY scanner ./scanner
+COPY third_party ./third_party
 
 RUN pip install --no-cache-dir -r requirements.lock \
     && pip install --no-cache-dir --no-deps .

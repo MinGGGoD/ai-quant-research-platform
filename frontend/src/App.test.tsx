@@ -84,51 +84,6 @@ const signal = {
   explanation: 'Technical volume signal detected for research inspection.',
 }
 
-const runSignal = {
-  ...signal,
-  stock: {
-    id: 1,
-    symbol: '600519',
-    exchange: 'SSE',
-    name: 'Synthetic Alpha',
-  },
-}
-
-const scannerRun = {
-  id: 'run-1',
-  status: 'completed_with_warnings',
-  data_date: '2026-06-12',
-  universe_name: 'synthetic_universe',
-  started_at: '2026-06-13T02:00:00Z',
-  finished_at: '2026-06-13T02:01:00Z',
-  total_stocks: 2,
-  processed_stocks: 1,
-  matched_stocks: 1,
-  warning_count: 1,
-  error_count: 0,
-}
-
-const scannerRunDetail = {
-  id: scannerRun.id,
-  status: scannerRun.status,
-  data_date: scannerRun.data_date,
-  universe_name: scannerRun.universe_name,
-  parameters: {
-    signals: [{ code: 'volume_spike', version: 1 }],
-    universe: 'synthetic_universe',
-  },
-  started_at: scannerRun.started_at,
-  finished_at: scannerRun.finished_at,
-  summary: {
-    total_stocks: scannerRun.total_stocks,
-    processed_stocks: scannerRun.processed_stocks,
-    matched_stocks: scannerRun.matched_stocks,
-    warning_count: scannerRun.warning_count,
-    error_count: scannerRun.error_count,
-  },
-  error_message: 'One stock had insufficient lookback history.',
-}
-
 function jsonResponse(payload: unknown, status = 200): Response {
   return new Response(JSON.stringify(payload), {
     status,
@@ -161,28 +116,6 @@ function installSuccessfulFetch(syncStatus = 200): ReturnType<typeof vi.fn> {
         jsonResponse({
           items: stocks,
           pagination: { limit: 30, offset: 0, total: 2 },
-        }),
-      )
-    }
-    if (url.pathname === '/api/v1/scanner-runs') {
-      return Promise.resolve(
-        jsonResponse({
-          items: [scannerRun],
-          pagination: { limit: 8, offset: 0, total: 1 },
-        }),
-      )
-    }
-    if (url.pathname === '/api/v1/scanner-runs/run-1') {
-      return Promise.resolve(jsonResponse(scannerRunDetail))
-    }
-    if (url.pathname === '/api/v1/signals') {
-      return Promise.resolve(
-        jsonResponse({
-          items:
-            url.searchParams.get('scanner_run_id') === 'run-1'
-              ? [runSignal]
-              : [],
-          pagination: { limit: 200, offset: 0, total: 1 },
         }),
       )
     }
@@ -249,6 +182,55 @@ function installSuccessfulFetch(syncStatus = 200): ReturnType<typeof vi.fn> {
         }),
       )
     }
+    if (url.pathname.endsWith('/chan-analysis')) {
+      const symbol = url.pathname.split('/').at(-2) as keyof typeof pricesBySymbol
+      const stock = stocks.find((item) => item.symbol === symbol)
+      return Promise.resolve(
+        jsonResponse({
+          stock,
+          frequency: url.searchParams.get('frequency') ?? 'daily',
+          algorithm: {
+            code: 'vespa314_chan_py',
+            version: 1,
+            parameters: {},
+          },
+          price_bar_count: pricesBySymbol[symbol].length,
+          fractals: [],
+          strokes: [],
+          segments: [],
+          centers: [],
+          observations:
+            symbol === '600519'
+              ? [
+                  {
+                    index: 1,
+                    bar_time: '2026-06-12',
+                    trade_date: '2026-06-12',
+                    timestamp: null,
+                    kind: 'B2',
+                    side: 'buy',
+                    label: 'B2 observation',
+                    price: 10.1,
+                    status: 'confirmed',
+                    explanation: 'Synthetic buy point.',
+                  },
+                  {
+                    index: 0,
+                    bar_time: '2026-06-11',
+                    trade_date: '2026-06-11',
+                    timestamp: null,
+                    kind: 'S1',
+                    side: 'sell',
+                    label: 'S1 observation',
+                    price: 10.5,
+                    status: 'confirmed',
+                    explanation: 'Synthetic sell point.',
+                  },
+                ]
+              : [],
+        }),
+      )
+    }
     if (url.pathname.endsWith('/signals')) {
       const symbol = url.pathname.split('/').at(-2)
       return Promise.resolve(
@@ -278,7 +260,7 @@ afterEach(() => {
 })
 
 describe('App', () => {
-  it('loads the dashboard and displays chart, signals, and scanner runs', async () => {
+  it('loads the dashboard and displays chart, signals, and Chan buy/sell points', async () => {
     installSuccessfulFetch()
 
     render(<App />)
@@ -295,7 +277,13 @@ describe('App', () => {
     expect(screen.getByText('MA5 --')).toBeInTheDocument()
     expect(screen.getByText(/Only 2 stored daily records/i)).toBeInTheDocument()
     expect(screen.getByText('Volume Spike')).toBeInTheDocument()
-    expect(screen.getByText('synthetic_universe')).toBeInTheDocument()
+    expect(
+      screen.getByRole('heading', { name: 'Buy/sell points' }),
+    ).toBeInTheDocument()
+    expect(screen.getAllByText('B2').length).toBeGreaterThan(0)
+    expect(screen.getByText(/Second-class buy point/i)).toBeInTheDocument()
+    expect(screen.queryByText('Execution history')).not.toBeInTheDocument()
+    expect(screen.queryByText('Execution detail')).not.toBeInTheDocument()
     expect(
       screen.getByText(
         /not investment recommendations or trading instructions/i,
@@ -303,37 +291,29 @@ describe('App', () => {
     ).toBeInTheDocument()
   })
 
-  it('opens scanner-run detail and filters its matched signals', async () => {
+  it('focuses the chart when a Chan buy/sell point is selected', async () => {
     installSuccessfulFetch()
 
     render(<App />)
 
-    await screen.findByRole('heading', { name: 'Synthetic Alpha' })
+    await screen.findByRole('img', {
+      name: 'Daily K-line chart with 2 price records',
+    })
     fireEvent.click(
-      await screen.findByRole('button', {
-        name: 'Open scanner run synthetic_universe from 2026-06-12',
+      screen.getByRole('button', {
+        name: 'Focus B2 buy point at 2026-06-12',
       }),
     )
 
-    const detail = screen.getByRole('region', { name: 'Scanner run detail' })
     expect(
-      await within(detail).findByText(
-        'One stock had insufficient lookback history.',
-      ),
-    ).toBeInTheDocument()
-    expect(within(detail).getByText('synthetic_universe')).toBeInTheDocument()
+      screen.getByRole('button', {
+        name: 'Focus B2 buy point at 2026-06-12',
+      }),
+    ).toHaveAttribute('aria-pressed', 'true')
     expect(
-      within(detail).getByText('600519 / SSE - Synthetic Alpha'),
-    ).toBeInTheDocument()
-    expect(within(detail).getByText(/"volume_spike"/)).toBeInTheDocument()
-    expect(within(detail).getByText('1/1')).toBeInTheDocument()
-
-    fireEvent.change(within(detail).getByLabelText('Filter run signals'), {
-      target: { value: 'Beta' },
-    })
-
-    expect(
-      within(detail).getByText('No run signals match this filter.'),
+      screen.getByRole('img', {
+        name: 'Daily K-line chart with 2 price records',
+      }),
     ).toBeInTheDocument()
   })
 

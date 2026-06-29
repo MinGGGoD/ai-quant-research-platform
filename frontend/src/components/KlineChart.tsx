@@ -1,4 +1,13 @@
-import { useEffect, useEffectEvent, useMemo, useRef, useState } from 'react'
+import {
+  forwardRef,
+  useEffect,
+  useEffectEvent,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
+import type { ForwardedRef } from 'react'
 import type { KeyboardEvent, MouseEvent, PointerEvent } from 'react'
 
 import {
@@ -11,12 +20,17 @@ import type {
   ChartPoint,
   MovingAveragePeriod,
 } from '../chartData'
-import type { DailyPrice } from '../types'
+import type { ChanAnalysis, DailyPrice } from '../types'
 
 interface KlineChartProps {
   prices: DailyPrice[]
+  chanAnalysis?: ChanAnalysis | null
   interval: ChartInterval
   onIntervalChange: (interval: ChartInterval) => void
+}
+
+export interface KlineChartHandle {
+  focusObservation: (barTime: string) => void
 }
 
 interface Crosshair {
@@ -36,6 +50,13 @@ interface DragState {
   viewportStart: number
 }
 
+interface ChanLayerState {
+  centers: boolean
+  segments: boolean
+  strokes: boolean
+  observations: boolean
+}
+
 const WIDTH = 1040
 const HEIGHT = 520
 const CHART_TOP = 62
@@ -45,6 +66,7 @@ const VOLUME_BOTTOM = 474
 const LEFT_PADDING = 24
 const RIGHT_PADDING = 76
 const MIN_VISIBLE_BARS = 10
+const FOCUSED_OBSERVATION_BARS = 40
 const INTERVAL_LABELS: Record<ChartInterval, string> = {
   '30m': '30-minute',
   '60m': '60-minute',
@@ -53,6 +75,18 @@ const INTERVAL_LABELS: Record<ChartInterval, string> = {
   '1M': 'Monthly',
 }
 const CHART_INTERVALS = ['30m', '60m', '1D', '1W', '1M'] as const
+const CHAN_LAYER_LABELS: Record<keyof ChanLayerState, string> = {
+  centers: 'Centers',
+  segments: 'Segments',
+  strokes: 'Strokes',
+  observations: 'B/S',
+}
+const DEFAULT_CHAN_LAYERS: ChanLayerState = {
+  centers: true,
+  segments: false,
+  strokes: true,
+  observations: true,
+}
 const MA_COLORS: Record<MovingAveragePeriod, string> = {
   5: '#d97706',
   10: '#db2777',
@@ -100,10 +134,14 @@ function movingAveragePath(
 
 function PopulatedKlineChart({
   prices,
+  chanAnalysis,
+  chartRef,
   interval,
   onIntervalChange,
-}: KlineChartProps) {
+}: KlineChartProps & { chartRef: ForwardedRef<KlineChartHandle> }) {
   const [crosshair, setCrosshair] = useState<Crosshair | null>(null)
+  const [chanLayers, setChanLayers] =
+    useState<ChanLayerState>(DEFAULT_CHAN_LAYERS)
   const [viewportState, setViewportState] = useState<Viewport>({
     key: '',
     start: 0,
@@ -181,6 +219,27 @@ function PopulatedKlineChart({
   )
   const activePoint = points[activeIndex]
   const activeBar = activePoint.bar
+  const visibleChanAnalysis =
+    chanAnalysis &&
+    ((interval === '1D' && chanAnalysis.frequency === 'daily') ||
+      interval === chanAnalysis.frequency)
+      ? chanAnalysis
+      : null
+  const canShowChanLayers = visibleChanAnalysis !== null
+  const allPointIndexByTime = useMemo(
+    () =>
+      new Map(
+        allPoints.map((point, index) => [point.bar.interval_start, index]),
+      ),
+    [allPoints],
+  )
+  const visiblePointByTime = new Map(
+    points.map((point, index) => [point.bar.interval_start, { index, point }]),
+  )
+  const xForTime = (time: string) => {
+    const match = visiblePointByTime.get(time)
+    return match ? xForIndex(match.index) : null
+  }
   const previousBar = points[Math.max(0, activeIndex - 1)]?.bar
   const change = previousBar ? activeBar.close - previousBar.close : 0
   const changePercent =
@@ -220,6 +279,45 @@ function PopulatedKlineChart({
     })
     setCrosshair(null)
   }
+
+  useImperativeHandle(
+    chartRef,
+    () => ({
+      focusObservation(barTime: string) {
+        const targetIndex = allPointIndexByTime.get(barTime)
+        if (targetIndex === undefined) {
+          return
+        }
+
+        const nextCount = Math.max(
+          minimumVisibleCount,
+          Math.min(allPoints.length, FOCUSED_OBSERVATION_BARS),
+        )
+        const nextStart = Math.max(
+          0,
+          Math.min(
+            allPoints.length - nextCount,
+            targetIndex - Math.floor(nextCount / 2),
+          ),
+        )
+        setViewportState({
+          key: viewportKey,
+          count: nextCount,
+          start: nextStart,
+        })
+        setCrosshair({
+          index: Math.max(0, Math.min(nextCount - 1, targetIndex - nextStart)),
+          y: CHART_TOP + (PRICE_BOTTOM - CHART_TOP) / 2,
+        })
+      },
+    }),
+    [
+      allPointIndexByTime,
+      allPoints.length,
+      minimumVisibleCount,
+      viewportKey,
+    ],
+  )
 
   const zoomAt = (direction: 'in' | 'out', anchorRatio = 0.5) => {
     const nextCount =
@@ -360,6 +458,31 @@ function PopulatedKlineChart({
             {INTERVAL_LABELS[interval]} bars | {points.length}/
             {allPoints.length} visible
           </span>
+          {canShowChanLayers && (
+            <div
+              className="chan-layer-controls"
+              role="group"
+              aria-label="Chan theory layers"
+            >
+              {(
+                Object.keys(CHAN_LAYER_LABELS) as Array<keyof ChanLayerState>
+              ).map((layer) => (
+                <label key={layer}>
+                  <input
+                    type="checkbox"
+                    checked={chanLayers[layer]}
+                    onChange={(event) =>
+                      setChanLayers((current) => ({
+                        ...current,
+                        [layer]: event.target.checked,
+                      }))
+                    }
+                  />
+                  <span>{CHAN_LAYER_LABELS[layer]}</span>
+                </label>
+              ))}
+            </div>
+          )}
           <div
             className="zoom-controls"
             role="group"
@@ -470,6 +593,35 @@ function PopulatedKlineChart({
             )
           })}
 
+          {canShowChanLayers &&
+            chanLayers.centers &&
+            visibleChanAnalysis.centers.map((center, index) => {
+              const startX = xForTime(center.start_time)
+              const endX = xForTime(center.end_time)
+              if (startX === null || endX === null) {
+                return null
+              }
+              const top = priceY(center.price_high)
+              const bottom = priceY(center.price_low)
+              return (
+                <g
+                  className={`chan-center ${center.status}`}
+                  key={`${center.start_time}:${center.end_time}:${index}`}
+                >
+                  <title>
+                    Center {center.status}: {center.price_low.toFixed(2)}-
+                    {center.price_high.toFixed(2)}
+                  </title>
+                  <rect
+                    x={Math.min(startX, endX)}
+                    y={top}
+                    width={Math.max(2, Math.abs(endX - startX))}
+                    height={Math.max(2, bottom - top)}
+                  />
+                </g>
+              )
+            })}
+
           {points.map((point, index) => {
             const { bar } = point
             const x = xForIndex(index)
@@ -518,6 +670,93 @@ function PopulatedKlineChart({
               />
             ) : null
           })}
+
+          {canShowChanLayers &&
+            chanLayers.segments &&
+            visibleChanAnalysis.segments.map((segment, index) => {
+              const startX = xForTime(segment.start_time)
+              const endX = xForTime(segment.end_time)
+              if (startX === null || endX === null) {
+                return null
+              }
+              const startY =
+                segment.direction === 'down'
+                  ? priceY(segment.price_high)
+                  : priceY(segment.price_low)
+              const endY =
+                segment.direction === 'down'
+                  ? priceY(segment.price_low)
+                  : priceY(segment.price_high)
+              return (
+                <g
+                  className={`chan-segment ${segment.status}`}
+                  key={`${segment.start_time}:${segment.end_time}:${index}`}
+                >
+                  <title>
+                    Segment {segment.direction}, {segment.status}
+                  </title>
+                  <line x1={startX} x2={endX} y1={startY} y2={endY} />
+                </g>
+              )
+            })}
+
+          {canShowChanLayers &&
+            chanLayers.strokes &&
+            visibleChanAnalysis.strokes.map((stroke, index) => {
+              const startX = xForTime(stroke.start_time)
+              const endX = xForTime(stroke.end_time)
+              if (startX === null || endX === null) {
+                return null
+              }
+              const startY =
+                stroke.direction === 'down'
+                  ? priceY(stroke.price_high)
+                  : priceY(stroke.price_low)
+              const endY =
+                stroke.direction === 'down'
+                  ? priceY(stroke.price_low)
+                  : priceY(stroke.price_high)
+              return (
+                <g
+                  className={`chan-stroke ${stroke.status}`}
+                  key={`${stroke.start_time}:${stroke.end_time}:${index}`}
+                >
+                  <title>
+                    Stroke {stroke.direction}, {stroke.status}
+                  </title>
+                  <line x1={startX} x2={endX} y1={startY} y2={endY} />
+                </g>
+              )
+            })}
+
+          {canShowChanLayers &&
+            chanLayers.observations &&
+            visibleChanAnalysis.observations.map((observation) => {
+              const x = xForTime(observation.bar_time)
+              if (x === null) {
+                return null
+              }
+              const rawY =
+                observation.side === 'buy'
+                  ? priceY(observation.price) + 18
+                  : priceY(observation.price) - 18
+              const y = Math.max(
+                CHART_TOP + 12,
+                Math.min(PRICE_BOTTOM - 8, rawY),
+              )
+              return (
+                <g
+                  className={`chan-observation ${observation.side} ${observation.status}`}
+                  key={`${observation.bar_time}:${observation.kind}`}
+                >
+                  <title>{observation.explanation}</title>
+                  <rect x={x - 12} y={y - 10} width={24} height={16} rx={4} />
+                  <text x={x} y={y + 2} textAnchor="middle">
+                    {observation.kind}
+                  </text>
+                </g>
+              )
+            })}
 
           <line
             className="chart-separator"
@@ -624,23 +863,30 @@ function PopulatedKlineChart({
   )
 }
 
-function KlineChart({ prices, interval, onIntervalChange }: KlineChartProps) {
-  if (prices.length === 0) {
-    return (
-      <div className="empty-state chart-empty">
-        No {INTERVAL_LABELS[interval].toLowerCase()} price records are available
-        for this stock.
-      </div>
-    )
-  }
+const KlineChart = forwardRef<KlineChartHandle, KlineChartProps>(
+  function KlineChart(
+    { prices, chanAnalysis, interval, onIntervalChange }: KlineChartProps,
+    ref,
+  ) {
+    if (prices.length === 0) {
+      return (
+        <div className="empty-state chart-empty">
+          No {INTERVAL_LABELS[interval].toLowerCase()} price records are
+          available for this stock.
+        </div>
+      )
+    }
 
-  return (
-    <PopulatedKlineChart
-      prices={prices}
-      interval={interval}
-      onIntervalChange={onIntervalChange}
-    />
-  )
-}
+    return (
+      <PopulatedKlineChart
+        prices={prices}
+        chanAnalysis={chanAnalysis}
+        chartRef={ref}
+        interval={interval}
+        onIntervalChange={onIntervalChange}
+      />
+    )
+  },
+)
 
 export default KlineChart

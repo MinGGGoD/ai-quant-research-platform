@@ -90,6 +90,81 @@ class StockPriceSyncResponse(StockPricesResponse):
     sync: StockPriceSyncMetadata
 
 
+class ChanAlgorithmResponse(ApiModel):
+    code: str
+    version: int
+    parameters: dict[str, Any]
+
+
+class ChanFractalResponse(ApiModel):
+    index: int
+    bar_time: str
+    trade_date: date
+    timestamp: datetime | None = None
+    kind: Literal["top", "bottom"]
+    price: float
+    status: Literal["confirmed", "provisional"]
+
+
+class ChanStrokeResponse(ApiModel):
+    start_index: int
+    end_index: int
+    start_time: str
+    end_time: str
+    direction: Literal["up", "down", "neutral"]
+    price_low: float
+    price_high: float
+    status: Literal["confirmed", "provisional"]
+
+
+class ChanSegmentResponse(ApiModel):
+    start_index: int
+    end_index: int
+    start_time: str
+    end_time: str
+    direction: Literal["up", "down", "neutral"]
+    price_low: float
+    price_high: float
+    status: Literal["confirmed", "provisional"]
+    stroke_indexes: list[int]
+
+
+class ChanCenterResponse(ApiModel):
+    start_index: int
+    end_index: int
+    start_time: str
+    end_time: str
+    price_low: float
+    price_high: float
+    status: Literal["confirmed", "provisional"]
+    stroke_indexes: list[int]
+
+
+class ChanObservationResponse(ApiModel):
+    index: int
+    bar_time: str
+    trade_date: date
+    timestamp: datetime | None = None
+    kind: str
+    side: Literal["buy", "sell"]
+    label: str
+    price: float
+    status: Literal["confirmed", "provisional"]
+    explanation: str
+
+
+class ChanAnalysisResponse(ApiModel):
+    stock: StockReference
+    frequency: Literal["daily", "30m", "60m"] = "daily"
+    algorithm: ChanAlgorithmResponse
+    price_bar_count: int
+    fractals: list[ChanFractalResponse]
+    strokes: list[ChanStrokeResponse]
+    segments: list[ChanSegmentResponse]
+    centers: list[ChanCenterResponse]
+    observations: list[ChanObservationResponse]
+
+
 class ScannerRunResponse(ApiModel):
     id: UUID
     status: str

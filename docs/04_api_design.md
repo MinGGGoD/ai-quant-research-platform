@@ -89,6 +89,7 @@ framework-internal response details.
 | `GET` | `/api/v1/stocks` | List and filter stocks |
 | `GET` | `/api/v1/stocks/{symbol}` | Get one stock |
 | `GET` | `/api/v1/stocks/{symbol}/prices` | Get daily K-line data |
+| `GET` | `/api/v1/stocks/{symbol}/chan-analysis` | Get Chan-theory chart overlays |
 | `POST` | `/api/v1/stocks/{symbol}/prices/sync` | Cache missing daily K-line data |
 | `GET` | `/api/v1/scanner-runs` | List scanner runs |
 | `GET` | `/api/v1/scanner-runs/{run_id}` | Get one scanner run |
@@ -342,7 +343,70 @@ Database-backed rows retain `source_defined`.
 - An empty `items` array means the stock exists but has no data in the requested
   period.
 
-#### 7.3 Synchronize Daily K-Line Data
+#### 7.3 Get Chan-Theory Chart Overlays
+
+**Method and path**
+
+`GET /api/v1/stocks/{symbol}/chan-analysis`
+
+**Request parameters**
+
+| Name | Location | Type | Required | Description |
+|---|---|---|---|---|
+| `symbol` | Path | `string` | Yes | Local or suffixed stock code |
+| `exchange` | Query | `string` | No | `SSE`, `SZSE`, or `BSE`; useful with a local code |
+| `from_date` | Query | `date` | No | Inclusive start trading date |
+| `to_date` | Query | `date` | No | Inclusive end trading date |
+| `frequency` | Query | `string` | No | `daily`, `30m`, or `60m`; aliases `d`, `30`, and `60` are accepted |
+| `limit` | Query | `integer` | No | Maximum bars from 1 to 5000; defaults to 500 |
+
+The endpoint returns a deterministic, versioned Chan-theory structure snapshot
+for K-line chart overlays. Version 1 delegates the structural calculation to a
+vendored MIT-licensed snapshot of Vespa314/chan.py and adapts its fractals,
+strokes, segments, centers, and morphological buy/sell points into the platform
+response model. Observation labels such as `B1`, `B2`, `S2S`, `B3A`, or `S3B`
+are descriptive research markers, not investment recommendations.
+
+**Response example: `200 OK`**
+
+```json
+{
+  "stock": {
+    "id": 1,
+    "symbol": "600519",
+    "exchange": "SSE",
+    "name": "Kweichow Moutai"
+  },
+  "frequency": "daily",
+  "algorithm": {
+    "code": "vespa314_chan_py",
+    "version": 1,
+    "parameters": {
+      "source": "Vespa314/chan.py",
+      "source_commit": "429d6ed3043e",
+      "license": "MIT",
+      "engine": "vendored",
+      "status_policy": "chan_py_is_sure_false_maps_to_provisional"
+    }
+  },
+  "price_bar_count": 250,
+  "fractals": [],
+  "strokes": [],
+  "segments": [],
+  "centers": [],
+  "observations": []
+}
+```
+
+**Frontend usage**
+
+- Render returned items as optional K-line chart layers.
+- Distinguish `confirmed` and `provisional` elements visually.
+- Display buy/sell point labels as research observations only.
+- Hide daily overlays on weekly or monthly derived chart views unless a future
+  API version returns matching higher-level structures.
+
+#### 7.4 Synchronize Daily K-Line Data
 
 `POST /api/v1/stocks/{symbol}/prices/sync`
 

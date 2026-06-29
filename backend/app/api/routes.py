@@ -24,6 +24,13 @@ from backend.app.api.repository import (
     list_stocks,
 )
 from backend.app.api.schemas import (
+    ChanAlgorithmResponse,
+    ChanAnalysisResponse,
+    ChanCenterResponse,
+    ChanFractalResponse,
+    ChanObservationResponse,
+    ChanSegmentResponse,
+    ChanStrokeResponse,
     DailyPriceResponse,
     DateRangeResponse,
     DocumentCitation,
@@ -56,6 +63,7 @@ from backend.app.api.schemas import (
 )
 from backend.app.config import get_settings
 from backend.app.database import (
+    DailyPrice,
     KnowledgeDocument,
     ResearchNote,
     ScannerRun,
@@ -64,8 +72,17 @@ from backend.app.database import (
 )
 from backend.app.database.session import get_db_session
 from backend.app.main_constants import APP_VERSION
+from backend.app.services.chan_analysis import (
+    CHAN_ALGORITHM_CODE,
+    CHAN_ALGORITHM_PARAMETERS,
+    CHAN_ALGORITHM_VERSION,
+    ChanBar,
+    analyze_chan_structure,
+    decimal_value,
+)
 from backend.app.services.local_daily_cache import (
     LOCAL_CACHE_PRICE_ADJUSTMENT,
+    LocalCachedPrice,
     LocalCachedStock,
     LocalDailyCache,
     PriceFrequency,
@@ -498,6 +515,78 @@ def validate_signal_code(session: Session, signal_code: str | None) -> None:
         )
 
 
+def chan_bars_from_database_prices(prices: list[DailyPrice]) -> tuple[ChanBar, ...]:
+    return tuple(
+        ChanBar(
+            index=index,
+            trade_date=price.trade_date,
+            timestamp=None,
+            open=decimal_value(price.open),
+            high=decimal_value(price.high),
+            low=decimal_value(price.low),
+            close=decimal_value(price.close),
+            volume=decimal_value(price.volume),
+            amount=decimal_value(price.amount) if price.amount is not None else None,
+        )
+        for index, price in enumerate(prices)
+    )
+
+
+def chan_bars_from_local_prices(
+    prices: list[LocalCachedPrice],
+) -> tuple[ChanBar, ...]:
+    return tuple(
+        ChanBar(
+            index=index,
+            trade_date=price.trade_date,
+            timestamp=price.timestamp,
+            open=decimal_value(price.open),
+            high=decimal_value(price.high),
+            low=decimal_value(price.low),
+            close=decimal_value(price.close),
+            volume=decimal_value(price.volume),
+            amount=decimal_value(price.amount) if price.amount is not None else None,
+        )
+        for index, price in enumerate(prices)
+    )
+
+
+def chan_analysis_response(
+    stock: Stock | LocalCachedStock,
+    price_frequency: PriceFrequency,
+    bars: tuple[ChanBar, ...],
+) -> ChanAnalysisResponse:
+    analysis = analyze_chan_structure(bars, frequency=price_frequency)
+    return ChanAnalysisResponse(
+        stock=StockReference.model_validate(stock),
+        frequency=price_frequency,
+        algorithm=ChanAlgorithmResponse(
+            code=CHAN_ALGORITHM_CODE,
+            version=CHAN_ALGORITHM_VERSION,
+            parameters=CHAN_ALGORITHM_PARAMETERS,
+        ),
+        price_bar_count=len(bars),
+        fractals=[
+            ChanFractalResponse.model_validate(fractal)
+            for fractal in analysis.fractals
+        ],
+        strokes=[
+            ChanStrokeResponse.model_validate(stroke) for stroke in analysis.strokes
+        ],
+        segments=[
+            ChanSegmentResponse.model_validate(segment)
+            for segment in analysis.segments
+        ],
+        centers=[
+            ChanCenterResponse.model_validate(center) for center in analysis.centers
+        ],
+        observations=[
+            ChanObservationResponse.model_validate(observation)
+            for observation in analysis.observations
+        ],
+    )
+
+
 @api_router.get("/health", response_model=ReadinessResponse, tags=["health"])
 def readiness(session: DatabaseSession) -> ReadinessResponse:
     session.execute(text("SELECT 1"))
@@ -625,6 +714,63 @@ def get_stock_prices(
         stock=StockReference.model_validate(stock),
         frequency=price_frequency,
         items=[DailyPriceResponse.model_validate(price) for price in database_prices],
+    )
+
+
+@resource_router.get(
+    "/stocks/{symbol}/chan-analysis",
+    response_model=ChanAnalysisResponse,
+    responses=error_responses(),
+    tags=["stocks"],
+)
+def get_stock_chan_analysis(
+    symbol: str,
+    session: DatabaseSession,
+    local_cache: LocalDailyCacheDependency,
+    exchange: str | None = None,
+    from_date: date | None = None,
+    to_date: date | None = None,
+    limit: int = Query(default=500, ge=1, le=MAX_INTRADAY_PRICE_LIMIT),
+    frequency: str = "daily",
+) -> ChanAnalysisResponse:
+    validate_date_range(from_date, to_date)
+    price_frequency = normalize_price_frequency(frequency)
+    local_stock = resolve_local_cache_stock(local_cache, symbol, exchange)
+    if local_stock is not None:
+        local_prices = local_cache.list_prices(
+            local_stock,
+            from_date=from_date,
+            to_date=to_date,
+            limit=limit,
+            frequency=price_frequency,
+        )
+        return chan_analysis_response(
+            local_stock,
+            price_frequency,
+            chan_bars_from_local_prices(local_prices),
+        )
+
+    stock = resolve_database_stock(session, symbol, exchange)
+    if price_frequency != "daily":
+        raise ApiError(
+            status_code=404,
+            code="price_history_not_found",
+            message=(
+                "The requested intraday price history is not available in the "
+                "local BaoStock cache."
+            ),
+        )
+    database_prices = list_prices(
+        session,
+        stock_id=stock.id,
+        from_date=from_date,
+        to_date=to_date,
+        limit=limit,
+    )
+    return chan_analysis_response(
+        stock,
+        price_frequency,
+        chan_bars_from_database_prices(database_prices),
     )
 
 

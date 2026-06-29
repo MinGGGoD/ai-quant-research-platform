@@ -1,11 +1,9 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 
 import {
   ApiError,
-  getScannerRunDetail,
-  getScannerRuns,
-  getSignalsForScannerRun,
+  getStockChanAnalysis,
   getStockPrices,
   getStockSignals,
   getStocks,
@@ -14,12 +12,13 @@ import {
 import './App.css'
 import type { ChartInterval } from './chartData'
 import KlineChart from './components/KlineChart'
+import type { KlineChartHandle } from './components/KlineChart'
 import type {
+  ChanAnalysis,
+  ChanObservation,
   DailyPrice,
   Pagination,
   PriceFrequency,
-  ScannerRun,
-  ScannerRunDetail,
   Stock,
   StockPriceSyncMetadata,
   StockPriceSyncResponse,
@@ -103,23 +102,39 @@ function formatNumber(value: number): string {
   }).format(value)
 }
 
-function formatDateTime(value: string): string {
-  return new Intl.DateTimeFormat('en', {
-    dateStyle: 'medium',
-    timeStyle: 'short',
-  }).format(new Date(value))
-}
-
 function humanize(value: string): string {
   return value.replaceAll('_', ' ')
 }
 
-function formatJson(value: unknown): string {
-  try {
-    return JSON.stringify(value, null, 2) ?? '{}'
-  } catch {
-    return '{}'
+function chanObservationKey(observation: ChanObservation): string {
+  return `${observation.bar_time}:${observation.kind}:${observation.side}:${observation.index}`
+}
+
+function chanObservationReason(observation: ChanObservation): string {
+  const sideText = observation.side === 'buy' ? 'buy' : 'sell'
+  const types = observation.kind
+    .split('/')
+    .map((kind) => kind.replace(/^[BS]/, '').toUpperCase())
+  const primaryType = types[0]
+  const primaryReason =
+    primaryType === '1'
+      ? `First-class ${sideText} point from chan.py, usually tied to a terminal stroke or segment after center and divergence checks.`
+      : primaryType === '1P'
+        ? `Pan-zheng first-class ${sideText} point from chan.py, based on same-direction stroke divergence checks.`
+        : primaryType === '2'
+          ? `Second-class ${sideText} point from chan.py, a follow-up pullback after a related first-class point within the configured retracement bound.`
+          : primaryType === '2S'
+            ? `Similar second-class ${sideText} point from chan.py, extended from the second-class setup while the follow-up strokes keep overlap.`
+            : primaryType === '3A'
+              ? `Third-class ${sideText} point from chan.py, after price leaves a center and the next opposite stroke does not return into that center.`
+              : primaryType === '3B'
+                ? `Third-class ${sideText} point from chan.py, based on a center boundary break and retest around the related first-class point.`
+                : observation.explanation
+  const extraTypes = types.slice(1)
+  if (extraTypes.length === 0) {
+    return primaryReason
   }
+  return `${primaryReason} It also satisfies ${extraTypes.join('/')} conditions, so the labels are combined.`
 }
 
 function errorMessage(error: unknown): string {
@@ -145,14 +160,11 @@ function App() {
   const [prices, setPrices] = useState<DailyPrice[]>([])
   const [chartInterval, setChartInterval] = useState<ChartInterval>('1D')
   const [priceAdjustment, setPriceAdjustment] = useState('source_defined')
+  const [chanAnalysis, setChanAnalysis] = useState<ChanAnalysis | null>(null)
   const [signals, setSignals] = useState<TechnicalSignal[]>([])
-  const [scannerRuns, setScannerRuns] = useState<ScannerRun[]>([])
-  const [selectedRunId, setSelectedRunId] = useState<string | null>(null)
-  const [selectedRunDetail, setSelectedRunDetail] =
-    useState<ScannerRunDetail | null>(null)
-  const [selectedRunSignals, setSelectedRunSignals] = useState<
-    TechnicalSignal[]
-  >([])
+  const [focusedChanObservationKey, setFocusedChanObservationKey] = useState<
+    string | null
+  >(null)
   const [syncMetadata, setSyncMetadata] =
     useState<StockPriceSyncMetadata | null>(null)
   const [recentStocks, setRecentStocks] = useState<Stock[]>(loadRecentStocks)
@@ -161,16 +173,10 @@ function App() {
   const [stockOffset, setStockOffset] = useState(0)
   const [stocksLoading, setStocksLoading] = useState(true)
   const [detailLoading, setDetailLoading] = useState(false)
-  const [runsLoading, setRunsLoading] = useState(true)
-  const [runDetailLoading, setRunDetailLoading] = useState(false)
   const [stocksError, setStocksError] = useState<string | null>(null)
   const [detailError, setDetailError] = useState<string | null>(null)
   const [syncWarning, setSyncWarning] = useState<string | null>(null)
-  const [runsError, setRunsError] = useState<string | null>(null)
-  const [runDetailError, setRunDetailError] = useState<string | null>(null)
   const [dateRangeError, setDateRangeError] = useState<string | null>(null)
-  const [runSignalQuery, setRunSignalQuery] = useState('')
-  const [runSignalCode, setRunSignalCode] = useState('')
   const [dateRange, setDateRange] =
     useState<SelectedDateRange>(defaultDateRange)
   const [appliedDateRange, setAppliedDateRange] =
@@ -179,9 +185,8 @@ function App() {
     useState<DetailRequestMode>('cache')
   const [stockReloadToken, setStockReloadToken] = useState(0)
   const [detailReloadToken, setDetailReloadToken] = useState(0)
-  const [runsReloadToken, setRunsReloadToken] = useState(0)
-  const [runDetailReloadToken, setRunDetailReloadToken] = useState(0)
   const pendingSearchSync = useRef(false)
+  const chartRef = useRef<KlineChartHandle>(null)
   const today = localIsoDate(new Date())
   const priceFrequency = frequencyForChartInterval(chartInterval)
 
@@ -213,6 +218,7 @@ function App() {
       setDetailError(null)
       setSyncWarning(null)
       setSyncMetadata(null)
+      setFocusedChanObservationKey(null)
       if (stock) {
         setDetailLoading(true)
         setDetailRequestMode(requestMode)
@@ -224,6 +230,7 @@ function App() {
         setDetailLoading(false)
         setPrices([])
         setPriceAdjustment('source_defined')
+        setChanAnalysis(null)
         setSignals([])
       }
     },
@@ -235,6 +242,7 @@ function App() {
       const currentFrequency = frequencyForChartInterval(chartInterval)
       const nextFrequency = frequencyForChartInterval(nextInterval)
       setChartInterval(nextInterval)
+      setFocusedChanObservationKey(null)
       if (selectedStock && nextFrequency !== currentFrequency) {
         setDetailLoading(true)
         setDetailError(null)
@@ -245,17 +253,6 @@ function App() {
     },
     [chartInterval, selectedStock],
   )
-
-  const selectScannerRun = useCallback((runId: string) => {
-    setSelectedRunId(runId)
-    setSelectedRunDetail(null)
-    setSelectedRunSignals([])
-    setRunDetailError(null)
-    setRunDetailLoading(true)
-    setRunSignalQuery('')
-    setRunSignalCode('')
-    setRunDetailReloadToken((value) => value + 1)
-  }, [])
 
   useEffect(() => {
     const controller = new AbortController()
@@ -291,59 +288,6 @@ function App() {
   }, [activeQuery, selectStock, stockOffset, stockReloadToken])
 
   useEffect(() => {
-    const controller = new AbortController()
-
-    getScannerRuns(controller.signal)
-      .then((response) => setScannerRuns(response.items))
-      .catch((error: unknown) => {
-        if (error instanceof DOMException && error.name === 'AbortError') {
-          return
-        }
-        setScannerRuns([])
-        setRunsError(errorMessage(error))
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) {
-          setRunsLoading(false)
-        }
-      })
-
-    return () => controller.abort()
-  }, [runsReloadToken])
-
-  useEffect(() => {
-    if (!selectedRunId) {
-      return
-    }
-
-    const controller = new AbortController()
-
-    Promise.all([
-      getScannerRunDetail(selectedRunId, controller.signal),
-      getSignalsForScannerRun(selectedRunId, controller.signal),
-    ])
-      .then(([runDetail, signalResponse]) => {
-        setSelectedRunDetail(runDetail)
-        setSelectedRunSignals(signalResponse.items)
-      })
-      .catch((error: unknown) => {
-        if (error instanceof DOMException && error.name === 'AbortError') {
-          return
-        }
-        setSelectedRunDetail(null)
-        setSelectedRunSignals([])
-        setRunDetailError(errorMessage(error))
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) {
-          setRunDetailLoading(false)
-        }
-      })
-
-    return () => controller.abort()
-  }, [runDetailReloadToken, selectedRunId])
-
-  useEffect(() => {
     if (!selectedStock) {
       return
     }
@@ -369,6 +313,14 @@ function App() {
             priceFrequency,
             controller.signal,
           ),
+      getStockChanAnalysis(
+        selectedStock.symbol,
+        selectedStock.exchange,
+        appliedDateRange.fromDate,
+        appliedDateRange.toDate,
+        priceFrequency,
+        controller.signal,
+      ),
       getStockSignals(
         selectedStock.symbol,
         selectedStock.exchange,
@@ -377,9 +329,10 @@ function App() {
         controller.signal,
       ),
     ])
-      .then(([priceResponse, signalResponse]) => {
+      .then(([priceResponse, chanResponse, signalResponse]) => {
         setPrices(priceResponse.items)
         setPriceAdjustment(priceResponse.price_adjustment)
+        setChanAnalysis(chanResponse)
         setSignals(signalResponse.items)
         setSyncMetadata(
           hasSyncMetadata(priceResponse) ? priceResponse.sync : null,
@@ -391,8 +344,20 @@ function App() {
         }
         if (shouldSynchronizeDaily) {
           try {
-            const [cachedPriceResponse, signalResponse] = await Promise.all([
+            const [
+              cachedPriceResponse,
+              chanResponse,
+              signalResponse,
+            ] = await Promise.all([
               getStockPrices(
+                selectedStock.symbol,
+                selectedStock.exchange,
+                appliedDateRange.fromDate,
+                appliedDateRange.toDate,
+                'daily',
+                controller.signal,
+              ),
+              getStockChanAnalysis(
                 selectedStock.symbol,
                 selectedStock.exchange,
                 appliedDateRange.fromDate,
@@ -410,6 +375,7 @@ function App() {
             ])
             setPrices(cachedPriceResponse.items)
             setPriceAdjustment(cachedPriceResponse.price_adjustment)
+            setChanAnalysis(chanResponse)
             setSignals(signalResponse.items)
             setSyncMetadata(null)
             setSyncWarning(
@@ -427,6 +393,7 @@ function App() {
           }
         }
         setPrices([])
+        setChanAnalysis(null)
         setSignals([])
         setDetailError(errorMessage(error))
       })
@@ -470,6 +437,7 @@ function App() {
       if (activeQuery === searchInput.trim() && stockOffset === 0) {
         setStockReloadToken((value) => value + 1)
       }
+      setFocusedChanObservationKey(null)
     },
     [activeQuery, dateRange, searchInput, stockOffset, today],
   )
@@ -482,40 +450,6 @@ function App() {
     [selectStock],
   )
 
-  const runSignalCodes = useMemo(
-    () =>
-      Array.from(
-        new Set(selectedRunSignals.map((signal) => signal.signal.code)),
-      ).sort(),
-    [selectedRunSignals],
-  )
-
-  const filteredRunSignals = useMemo(() => {
-    const query = runSignalQuery.trim().toLowerCase()
-    return selectedRunSignals.filter((signal) => {
-      const matchesCode = !runSignalCode || signal.signal.code === runSignalCode
-      if (!matchesCode) {
-        return false
-      }
-      if (!query) {
-        return true
-      }
-      const stockText = signal.stock
-        ? `${signal.stock.symbol} ${signal.stock.exchange} ${signal.stock.name}`
-        : ''
-      return [
-        stockText,
-        signal.signal.name,
-        signal.signal.code,
-        signal.explanation,
-        signal.signal_date,
-      ]
-        .join(' ')
-        .toLowerCase()
-        .includes(query)
-    })
-  }, [runSignalCode, runSignalQuery, selectedRunSignals])
-
   const latestPrice = prices.at(-1)
   const previousPrice = prices.at(-2)
   const priceChange =
@@ -525,6 +459,15 @@ function App() {
   const canGoBack = stockPagination.offset > 0
   const canGoForward =
     stockPagination.offset + stockPagination.limit < stockPagination.total
+  const visibleChanAnalysis =
+    chanAnalysis &&
+    ((chartInterval === '1D' && chanAnalysis.frequency === 'daily') ||
+      chartInterval === chanAnalysis.frequency)
+      ? chanAnalysis
+      : null
+  const chanObservations = visibleChanAnalysis
+    ? [...visibleChanAnalysis.observations].reverse()
+    : []
 
   return (
     <div className="app">
@@ -763,7 +706,9 @@ function App() {
                     )}
                     <KlineChart
                       key={`${selectedStock.exchange}:${selectedStock.symbol}`}
+                      ref={chartRef}
                       prices={prices}
+                      chanAnalysis={chanAnalysis}
                       interval={chartInterval}
                       onIntervalChange={changeChartInterval}
                     />
@@ -862,274 +807,88 @@ function App() {
             )}
           </section>
 
-          <section
-            className="panel run-detail-panel"
-            aria-labelledby="run-detail-heading"
-          >
-            <div className="panel-heading">
-              <div>
-                <p className="section-kicker">Execution detail</p>
-                <h2 id="run-detail-heading">Scanner run detail</h2>
-              </div>
-              {selectedRunId && (
-                <button
-                  className="secondary-action"
-                  type="button"
-                  onClick={() => {
-                    setSelectedRunId(null)
-                    setSelectedRunDetail(null)
-                    setSelectedRunSignals([])
-                    setRunDetailError(null)
-                    setRunDetailLoading(false)
-                    setRunSignalQuery('')
-                    setRunSignalCode('')
-                  }}
-                >
-                  Close
-                </button>
-              )}
-            </div>
-
-            {!selectedRunId ? (
-              <div className="empty-state">
-                Select a scanner run to inspect its configuration, status, and
-                matched technical signals.
-              </div>
-            ) : runDetailLoading ? (
-              <div className="loading-state" role="status">
-                Loading scanner run detail...
-              </div>
-            ) : runDetailError ? (
-              <div className="error-state" role="alert">
-                <p>{runDetailError}</p>
-                <button
-                  onClick={() => {
-                    setRunDetailLoading(true)
-                    setRunDetailError(null)
-                    setRunDetailReloadToken((value) => value + 1)
-                  }}
-                >
-                  Retry
-                </button>
-              </div>
-            ) : selectedRunDetail ? (
-              <div className="run-detail-content">
-                <div className="run-detail-header">
-                  <div>
-                    <span className={`run-status ${selectedRunDetail.status}`}>
-                      {humanize(selectedRunDetail.status)}
-                    </span>
-                    <h3>{selectedRunDetail.universe_name}</h3>
-                    <p>
-                      Market date {selectedRunDetail.data_date} - Started{' '}
-                      {formatDateTime(selectedRunDetail.started_at)}
-                    </p>
-                  </div>
-                  <div className="run-id-block">
-                    <span>Run ID</span>
-                    <code>{selectedRunDetail.id}</code>
-                  </div>
-                </div>
-
-                <dl className="run-detail-metrics">
-                  <div>
-                    <dt>Total</dt>
-                    <dd>{selectedRunDetail.summary.total_stocks}</dd>
-                  </div>
-                  <div>
-                    <dt>Processed</dt>
-                    <dd>{selectedRunDetail.summary.processed_stocks}</dd>
-                  </div>
-                  <div>
-                    <dt>Matched</dt>
-                    <dd>{selectedRunDetail.summary.matched_stocks}</dd>
-                  </div>
-                  <div>
-                    <dt>Warnings</dt>
-                    <dd>{selectedRunDetail.summary.warning_count}</dd>
-                  </div>
-                  <div>
-                    <dt>Errors</dt>
-                    <dd>{selectedRunDetail.summary.error_count}</dd>
-                  </div>
-                </dl>
-
-                {selectedRunDetail.error_message && (
-                  <div className="sync-warning" role="status">
-                    {selectedRunDetail.error_message}
-                  </div>
-                )}
-
-                <div className="run-parameters">
-                  <span>Parameters</span>
-                  <pre>{formatJson(selectedRunDetail.parameters)}</pre>
-                </div>
-
-                <div className="run-signal-heading">
-                  <div>
-                    <p className="section-kicker">Run matched signals</p>
-                    <h3>Detected signals</h3>
-                  </div>
-                  <span className="count-badge">
-                    {filteredRunSignals.length}/{selectedRunSignals.length}
-                  </span>
-                </div>
-
-                {selectedRunSignals.length > 0 && (
-                  <div className="run-signal-filters">
-                    <label htmlFor="run-signal-query">
-                      Filter run signals
-                      <input
-                        id="run-signal-query"
-                        type="search"
-                        value={runSignalQuery}
-                        placeholder="Stock, code, or explanation"
-                        onChange={(event) =>
-                          setRunSignalQuery(event.target.value)
-                        }
-                      />
-                    </label>
-                    <label htmlFor="run-signal-code">
-                      Signal type
-                      <select
-                        id="run-signal-code"
-                        value={runSignalCode}
-                        onChange={(event) =>
-                          setRunSignalCode(event.target.value)
-                        }
-                      >
-                        <option value="">All signals</option>
-                        {runSignalCodes.map((code) => (
-                          <option value={code} key={code}>
-                            {humanize(code)}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                  </div>
-                )}
-
-                {selectedRunSignals.length === 0 ? (
-                  <div className="empty-state">
-                    No signals are stored for this scanner run.
-                  </div>
-                ) : filteredRunSignals.length === 0 ? (
-                  <div className="empty-state">
-                    No run signals match this filter.
-                  </div>
-                ) : (
-                  <div className="signal-list">
-                    {filteredRunSignals.map((signal) => (
-                      <article className="signal-card" key={signal.id}>
-                        <div className="signal-title">
-                          <div>
-                            <strong>{signal.signal.name}</strong>
-                            <span>
-                              {signal.signal.code} v{signal.signal.version}
-                            </span>
-                            {signal.stock && (
-                              <span className="signal-stock">
-                                {signal.stock.symbol} / {signal.stock.exchange}{' '}
-                                - {signal.stock.name}
-                              </span>
-                            )}
-                          </div>
-                          <time dateTime={signal.signal_date}>
-                            {signal.signal_date}
-                          </time>
-                        </div>
-                        <p>{signal.explanation}</p>
-                        <dl className="matched-values">
-                          {Object.entries(signal.matched_values)
-                            .slice(0, 4)
-                            .map(([key, value]) => (
-                              <div key={key}>
-                                <dt>{humanize(key)}</dt>
-                                <dd>
-                                  {typeof value === 'number'
-                                    ? formatNumber(value)
-                                    : String(value)}
-                                </dd>
-                              </div>
-                            ))}
-                        </dl>
-                      </article>
-                    ))}
-                  </div>
-                )}
-              </div>
-            ) : null}
-          </section>
         </section>
 
-        <aside className="panel runs-panel" aria-labelledby="runs-heading">
+        <aside
+          className="panel chan-bsp-panel"
+          aria-labelledby="chan-bsp-heading"
+        >
           <div className="panel-heading">
             <div>
-              <p className="section-kicker">Execution history</p>
-              <h2 id="runs-heading">Recent scanner runs</h2>
+              <p className="section-kicker">Chan theory</p>
+              <h2 id="chan-bsp-heading">Buy/sell points</h2>
             </div>
+            <span className="count-badge">{chanObservations.length}</span>
           </div>
 
-          {runsLoading ? (
+          {!selectedStock ? (
+            <div className="empty-state">
+              Select a stock to view Chan buy/sell points.
+            </div>
+          ) : detailLoading ? (
             <div className="loading-state" role="status">
-              Loading scanner runs...
+              Loading Chan structures...
             </div>
-          ) : runsError ? (
-            <div className="error-state" role="alert">
-              <p>{runsError}</p>
-              <button
-                onClick={() => {
-                  setRunsLoading(true)
-                  setRunsError(null)
-                  setRunsReloadToken((value) => value + 1)
-                }}
-              >
-                Retry
-              </button>
+          ) : detailError ? (
+            <div className="empty-state">
+              Buy/sell points are unavailable while chart data cannot be loaded.
             </div>
-          ) : scannerRuns.length === 0 ? (
-            <div className="empty-state">No scanner runs are stored yet.</div>
+          ) : !visibleChanAnalysis ? (
+            <div className="empty-state">
+              No buy/sell points are available for this chart interval.
+            </div>
+          ) : chanObservations.length === 0 ? (
+            <div className="empty-state">
+              No Chan buy/sell points were detected in this range.
+            </div>
           ) : (
-            <div className="run-list">
-              {scannerRuns.map((run) => (
-                <button
-                  className={
-                    run.id === selectedRunId ? 'run-card selected' : 'run-card'
-                  }
-                  key={run.id}
-                  type="button"
-                  aria-label={`Open scanner run ${run.universe_name} from ${run.data_date}`}
-                  aria-pressed={run.id === selectedRunId}
-                  onClick={() => selectScannerRun(run.id)}
-                >
-                  <div className="run-title">
-                    <span className={`run-status ${run.status}`}>
-                      {humanize(run.status)}
-                    </span>
-                    <time dateTime={run.started_at}>
-                      {formatDateTime(run.started_at)}
+            <div className="chan-bsp-list">
+              {chanObservations.map((observation) => {
+                const key = chanObservationKey(observation)
+                const active = key === focusedChanObservationKey
+                return (
+                  <button
+                    className={
+                      active ? 'chan-bsp-card selected' : 'chan-bsp-card'
+                    }
+                    key={key}
+                    type="button"
+                    aria-label={`Focus ${observation.kind} ${observation.side} point at ${observation.bar_time}`}
+                    aria-pressed={active}
+                    onClick={() => {
+                      setFocusedChanObservationKey(key)
+                      chartRef.current?.focusObservation(observation.bar_time)
+                    }}
+                  >
+                    <div className="chan-bsp-title">
+                      <span className={`chan-bsp-kind ${observation.side}`}>
+                        {observation.kind}
+                      </span>
+                      <span
+                        className={`chan-bsp-status ${observation.status}`}
+                      >
+                        {observation.status}
+                      </span>
+                    </div>
+                    <time dateTime={observation.bar_time}>
+                      {observation.bar_time.replace('T', ' ').slice(0, 16)}
                     </time>
-                  </div>
-                  <strong>{run.universe_name}</strong>
-                  <span className="run-date">Market date {run.data_date}</span>
-                  <dl className="run-metrics">
-                    <div>
-                      <dt>Processed</dt>
-                      <dd>
-                        {run.processed_stocks}/{run.total_stocks}
-                      </dd>
-                    </div>
-                    <div>
-                      <dt>Matched</dt>
-                      <dd>{run.matched_stocks}</dd>
-                    </div>
-                    <div>
-                      <dt>Warnings</dt>
-                      <dd>{run.warning_count}</dd>
-                    </div>
-                  </dl>
-                </button>
-              ))}
+                    <p className="chan-bsp-reason">
+                      {chanObservationReason(observation)}
+                    </p>
+                    <dl className="chan-bsp-metrics">
+                      <div>
+                        <dt>Side</dt>
+                        <dd>{observation.side}</dd>
+                      </div>
+                      <div>
+                        <dt>Price</dt>
+                        <dd>{observation.price.toFixed(2)}</dd>
+                      </div>
+                    </dl>
+                  </button>
+                )
+              })}
             </div>
           )}
         </aside>

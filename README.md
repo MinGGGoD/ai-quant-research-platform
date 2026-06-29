@@ -30,6 +30,9 @@ research-document retrieval extensions:
 - Stock search and selection, SVG daily K-line and volume charts, stored
   technical signals, recent scanner-run history, and click-through scanner-run
   detail with matched signal evidence.
+- Optional Chan-theory chart overlays powered by a vendored Vespa314/chan.py
+  engine for fractals, strokes, segments, centers, and morphological buy/sell
+  point research labels.
 - Two-year default chart periods with user-triggered, trade-calendar-aware
   incremental synchronization and PostgreSQL caching. AShareHub is preferred
   when configured; BaoStock is the credential-free SSE/SZSE fallback.

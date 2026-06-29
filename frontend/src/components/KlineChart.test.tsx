@@ -1,8 +1,10 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { createRef } from 'react'
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import type { DailyPrice } from '../types'
+import type { ChanAnalysis, DailyPrice } from '../types'
 import KlineChart from './KlineChart'
+import type { KlineChartHandle } from './KlineChart'
 
 function makePrices(count: number): DailyPrice[] {
   return Array.from({ length: count }, (_, index) => {
@@ -23,10 +25,100 @@ function makePrices(count: number): DailyPrice[] {
   })
 }
 
-function renderChart(prices: DailyPrice[], interval: '30m' | '1D' = '1D') {
+function makeChanAnalysis(): ChanAnalysis {
+  return {
+    stock: {
+      id: 1,
+      symbol: '600519',
+      exchange: 'SSE',
+      name: 'Synthetic Research Stock',
+    },
+    frequency: 'daily',
+    algorithm: {
+      code: 'vespa314_chan_py',
+      version: 1,
+      parameters: {},
+    },
+    price_bar_count: 6,
+    fractals: [
+      {
+        index: 1,
+        bar_time: '2026-01-02',
+        trade_date: '2026-01-02',
+        kind: 'top',
+        price: 10.6,
+        status: 'confirmed',
+      },
+      {
+        index: 3,
+        bar_time: '2026-01-04',
+        trade_date: '2026-01-04',
+        kind: 'bottom',
+        price: 9.7,
+        status: 'confirmed',
+      },
+    ],
+    strokes: [
+      {
+        start_index: 1,
+        end_index: 3,
+        start_time: '2026-01-02',
+        end_time: '2026-01-04',
+        direction: 'down',
+        price_low: 9.7,
+        price_high: 10.6,
+        status: 'confirmed',
+      },
+    ],
+    segments: [],
+    centers: [
+      {
+        start_index: 1,
+        end_index: 5,
+        start_time: '2026-01-02',
+        end_time: '2026-01-06',
+        price_low: 9.8,
+        price_high: 10.5,
+        status: 'confirmed',
+        stroke_indexes: [0, 1, 2],
+      },
+    ],
+    observations: [
+      {
+        index: 1,
+        bar_time: '2026-01-02',
+        trade_date: '2026-01-02',
+        kind: 'S1',
+        side: 'sell',
+        label: 'S1 observation',
+        price: 10.6,
+        status: 'confirmed',
+        explanation: 'Synthetic top fractal observation.',
+      },
+      {
+        index: 3,
+        bar_time: '2026-01-04',
+        trade_date: '2026-01-04',
+        kind: 'B2',
+        side: 'buy',
+        label: 'B2 observation',
+        price: 9.7,
+        status: 'confirmed',
+        explanation: 'Synthetic bottom fractal observation.',
+      },
+    ],
+  }
+}
+
+function renderChart(
+  prices: DailyPrice[],
+  interval: '30m' | '1D' = '1D',
+  chanAnalysis?: ChanAnalysis,
+) {
   return render(
     <KlineChart
       prices={prices}
+      chanAnalysis={chanAnalysis}
       interval={interval}
       onIntervalChange={vi.fn()}
     />,
@@ -150,6 +242,64 @@ describe('KlineChart', () => {
     expect(
       screen.getByRole('img', {
         name: '30-minute K-line chart with 1 price records',
+      }),
+    ).toBeInTheDocument()
+  })
+
+  it('renders Chan theory layer controls and observation labels', () => {
+    renderChart(makePrices(6), '1D', makeChanAnalysis())
+
+    expect(
+      screen.getByRole('group', { name: 'Chan theory layers' }),
+    ).toBeInTheDocument()
+    expect(screen.getByLabelText('Centers')).toBeChecked()
+    expect(screen.queryByLabelText('Fractals')).not.toBeInTheDocument()
+    expect(screen.getByText('B2')).toBeInTheDocument()
+    expect(screen.getByText('S1')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByLabelText('B/S'))
+
+    expect(screen.getByLabelText('B/S')).not.toBeChecked()
+  })
+
+  it('zooms to a focused Chan observation', async () => {
+    const prices = makePrices(80)
+    const targetDate = prices[50].trade_date
+    const analysis: ChanAnalysis = {
+      ...makeChanAnalysis(),
+      price_bar_count: prices.length,
+      observations: [
+        {
+          index: 50,
+          bar_time: targetDate,
+          trade_date: targetDate,
+          kind: 'B2',
+          side: 'buy',
+          label: 'B2 observation',
+          price: prices[50].low,
+          status: 'confirmed',
+          explanation: 'Synthetic focused observation.',
+        },
+      ],
+    }
+
+    const chartRef = createRef<KlineChartHandle>()
+    render(
+      <KlineChart
+        ref={chartRef}
+        prices={prices}
+        chanAnalysis={analysis}
+        interval="1D"
+        onIntervalChange={vi.fn()}
+      />,
+    )
+    act(() => {
+      chartRef.current?.focusObservation(targetDate)
+    })
+
+    expect(
+      await screen.findByRole('img', {
+        name: 'Daily K-line chart showing 40 of 80 price records',
       }),
     ).toBeInTheDocument()
   })

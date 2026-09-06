@@ -606,10 +606,7 @@ function PopulatedKlineChart({
                 className="crosshair-label"
                 x={Math.max(
                   LEFT_PADDING + 42,
-                  Math.min(
-                    WIDTH - RIGHT_PADDING - 42,
-                    xForIndex(activeIndex),
-                  ),
+                  Math.min(WIDTH - RIGHT_PADDING - 42, xForIndex(activeIndex)),
                 )}
                 y={VOLUME_BOTTOM + 23}
                 textAnchor="middle"

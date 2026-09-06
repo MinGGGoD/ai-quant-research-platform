@@ -113,10 +113,13 @@ class LocalDailyCache:
         limit: int,
         frequency: PriceFrequency = "daily",
     ) -> list[LocalCachedPrice]:
-        if frequency == "60m" and not self.price_file_for(
-            stock,
-            frequency="60m",
-        ).exists():
+        if (
+            frequency == "60m"
+            and not self.price_file_for(
+                stock,
+                frequency="60m",
+            ).exists()
+        ):
             thirty_minute_prices = self._read_prices(
                 stock,
                 from_date=from_date,
@@ -249,9 +252,7 @@ class LocalDailyCache:
             group = rows[index : index + 2]
             first = group[0]
             last = group[-1]
-            amounts = [
-                price.amount for price in group if price.amount is not None
-            ]
+            amounts = [price.amount for price in group if price.amount is not None]
             aggregated.append(
                 LocalCachedPrice(
                     trade_date=last.trade_date,

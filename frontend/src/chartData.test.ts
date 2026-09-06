@@ -68,7 +68,6 @@ describe('chart data', () => {
     ])
   })
 
-
   it('aggregates daily prices into calendar months', () => {
     const monthly = aggregatePrices(
       [

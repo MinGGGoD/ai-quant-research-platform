@@ -769,8 +769,8 @@ function App() {
                     />
                     <div className="chart-footer">
                       <span>
-                        {prices.length} stored {priceFrequencyLabel(priceFrequency)}{' '}
-                        record
+                        {prices.length} stored{' '}
+                        {priceFrequencyLabel(priceFrequency)} record
                         {prices.length === 1 ? '' : 's'}
                       </span>
                       <span>

@@ -1,8 +1,10 @@
 from datetime import date, datetime
+from pathlib import Path
 
 from backend.app.services.local_daily_cache import (
     LOCAL_CACHE_DERIVED_60M_SOURCE,
     LOCAL_CACHE_SOURCE,
+    LocalCachedStock,
     LocalDailyCache,
 )
 from backend.app.services.local_daily_cache_sync import (
@@ -37,7 +39,7 @@ class FakeDailyClient:
 
     def load_daily_rows(
         self,
-        stock,
+        stock: LocalCachedStock,
         *,
         start_date: date,
         end_date: date,
@@ -50,7 +52,7 @@ class FakeDailyClient:
         self.closed = True
 
 
-def test_local_daily_cache_lists_searches_and_loads_prices(tmp_path) -> None:
+def test_local_daily_cache_lists_searches_and_loads_prices(tmp_path: Path) -> None:
     cache_dir = tmp_path / "daily_qfq"
     category = "SSE Main Board"
     price_dir = cache_dir / "prices" / category
@@ -172,7 +174,7 @@ def test_local_daily_cache_lists_searches_and_loads_prices(tmp_path) -> None:
     assert hourly_prices[0].source == LOCAL_CACHE_DERIVED_60M_SOURCE
 
 
-def test_local_daily_cache_synchronizer_extends_cache_tail(tmp_path) -> None:
+def test_local_daily_cache_synchronizer_extends_cache_tail(tmp_path: Path) -> None:
     cache_dir = tmp_path / "daily_qfq"
     category = "SSE Main Board"
     price_dir = cache_dir / "prices" / category

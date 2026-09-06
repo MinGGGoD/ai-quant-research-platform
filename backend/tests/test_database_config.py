@@ -1,7 +1,18 @@
+from pathlib import Path
+
+import pytest
 from pydantic import SecretStr
 from sqlalchemy.engine import make_url
 
 from backend.app.config import Settings
+
+
+@pytest.fixture(autouse=True)
+def isolate_local_dotenv(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.chdir(tmp_path)
 
 
 def test_default_database_url_uses_postgresql_and_psycopg() -> None:
@@ -38,6 +49,18 @@ def test_ai_provider_is_disabled_without_explicit_configuration() -> None:
     settings = Settings()
 
     assert settings.ai_provider == "disabled"
+    assert settings.ai_api_key is None
+    assert settings.ai_model is None
+
+
+def test_empty_optional_dotenv_values_use_model_defaults(tmp_path: Path) -> None:
+    (tmp_path / ".env").write_text(
+        "AQR_AI_API_KEY=\nAQR_AI_MODEL=\n",
+        encoding="utf-8",
+    )
+
+    settings = Settings()
+
     assert settings.ai_api_key is None
     assert settings.ai_model is None
 

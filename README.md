@@ -42,11 +42,12 @@ research-document retrieval extensions:
 
 ## Requirements
 
-- Python 3.11, 3.12, or 3.13
-- Node.js 22 or newer and npm
+- uv 0.12.x; uv installs a compatible Python 3.11, 3.12, or 3.13 when needed
+- Node.js 22 or newer and pnpm 11
 - Docker with Docker Compose v2 for the container workflow
 
-The initial setup has been tested with Python 3.11 and Node.js 24.
+The package workflow is tested locally with Python 3.12 and Node.js 22, and in
+containers with Python 3.11 and Node.js 24.
 
 ## Repository Layout
 
@@ -115,30 +116,20 @@ not provide an automatic volume-deletion command.
 
 ### Python
 
-On Windows PowerShell:
-
-```powershell
-py -3.11 -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install --upgrade pip
-python -m pip install -r requirements.lock
-python -m pip install --no-deps -e .
-```
-
-On macOS or Linux:
+From the repository root on Windows, macOS, or Linux:
 
 ```sh
-python3.11 -m venv .venv
-source .venv/bin/activate
-python -m pip install --upgrade pip
-python -m pip install -r requirements.lock
-python -m pip install --no-deps -e .
+uv sync --frozen
 ```
+
+uv creates the project `.venv`, installs the project and development dependency
+group, and uses the exact versions recorded in `uv.lock`. Activating the virtual
+environment is optional because `uv run` executes commands inside it.
 
 Start the backend:
 
 ```sh
-uvicorn backend.app.main:app --reload
+uv run uvicorn backend.app.main:app --reload
 ```
 
 Verify it at `http://localhost:8000/health`.
@@ -146,15 +137,15 @@ Verify it at `http://localhost:8000/health`.
 Run the scanner shell:
 
 ```sh
-python -m scanner --help
+uv run python -m scanner --help
 ```
 
 ### Frontend
 
 ```sh
 cd frontend
-npm ci
-npm run dev
+pnpm install --frozen-lockfile
+pnpm run dev
 ```
 
 Open `http://localhost:5173`.
@@ -165,7 +156,7 @@ The dashboard reads `VITE_API_BASE_URL`, which defaults to
 ```powershell
 docker compose -f deployment/compose.yaml up -d postgres backend
 cd frontend
-npm run dev
+pnpm run dev
 ```
 
 The dashboard provides:
@@ -202,8 +193,8 @@ docker compose -f deployment/compose.yaml up -d postgres
 Apply migrations from the local Python environment:
 
 ```sh
-alembic upgrade head
-alembic current
+uv run alembic upgrade head
+uv run alembic current
 ```
 
 Or run migrations inside the backend container:
@@ -215,14 +206,14 @@ docker compose -f deployment/compose.yaml run --rm backend alembic upgrade head
 Generate the SQL without connecting to PostgreSQL:
 
 ```sh
-alembic upgrade head --sql
+uv run alembic upgrade head --sql
 ```
 
 Roll back the most recent migration only against a disposable or intentionally
 managed database:
 
 ```sh
-alembic downgrade -1
+uv run alembic downgrade -1
 ```
 
 The initial migration creates:
@@ -255,13 +246,13 @@ $env:AQR_ASHAREHUB_API_KEY = "your-api-key"
 Import one stock for a bounded date range:
 
 ```powershell
-python -m scanner ingest-asharehub --start-date 2026-06-12 --end-date 2026-06-12 --ts-code 000001.SZ
+uv run python -m scanner ingest-asharehub --start-date 2026-06-12 --end-date 2026-06-12 --ts-code 000001.SZ
 ```
 
 Omit `--ts-code` to import the complete Shanghai, Shenzhen, and Beijing market:
 
 ```powershell
-python -m scanner ingest-asharehub --start-date 2026-06-12 --end-date 2026-06-12 --max-requests 20
+uv run python -m scanner ingest-asharehub --start-date 2026-06-12 --end-date 2026-06-12 --max-requests 20
 ```
 
 Repeat `--ts-code` to import multiple selected stocks. Supported suffixes are
@@ -302,7 +293,7 @@ docker compose -f deployment/compose.yaml --profile tools run --rm scanner inges
 Import the documented synthetic sample after applying migrations:
 
 ```sh
-python -m scanner ingest-csv \
+uv run python -m scanner ingest-csv \
   --stocks-file data/sample/stocks.csv \
   --prices-file data/sample/daily_prices.csv \
   --source synthetic_csv_v1 \
@@ -312,7 +303,7 @@ python -m scanner ingest-csv \
 PowerShell accepts the same command on one line:
 
 ```powershell
-python -m scanner ingest-csv --stocks-file data/sample/stocks.csv --prices-file data/sample/daily_prices.csv --source synthetic_csv_v1 --expected-through 2026-06-13
+uv run python -m scanner ingest-csv --stocks-file data/sample/stocks.csv --prices-file data/sample/daily_prices.csv --source synthetic_csv_v1 --expected-through 2026-06-13
 ```
 
 The command validates the complete batch before writing and imports stocks and
@@ -460,7 +451,7 @@ If a chart contains only one candle, inspect the stored history and import a
 larger date range:
 
 ```powershell
-python -m scanner ingest-asharehub --start-date 2025-01-01 --end-date 2026-06-12 --ts-code 002130.SZ --max-requests 5
+uv run python -m scanner ingest-asharehub --start-date 2025-01-01 --end-date 2026-06-12 --ts-code 002130.SZ --max-requests 5
 ```
 
 Use dates appropriate to the selected stock and available provider quota.
@@ -468,13 +459,13 @@ Use dates appropriate to the selected stock and available provider quota.
 After importing sufficient history, scan all active and suspended stocks:
 
 ```powershell
-python -m scanner scan --data-date 2026-06-12
+uv run python -m scanner scan --data-date 2026-06-12
 ```
 
 Scan selected stocks and signals:
 
 ```powershell
-python -m scanner scan `
+uv run python -m scanner scan `
   --data-date 2026-06-12 `
   --stock 000001.SZ `
   --stock 600519.SH `
@@ -506,8 +497,8 @@ Start PostgreSQL, apply migrations, and run FastAPI:
 
 ```powershell
 docker compose -f deployment/compose.yaml up -d postgres
-alembic upgrade head
-uvicorn backend.app.main:app --reload
+uv run alembic upgrade head
+uv run uvicorn backend.app.main:app --reload
 ```
 
 Interactive OpenAPI documentation is available at
@@ -579,8 +570,8 @@ AQR_AI_MODEL=replace_with_a_supported_model
 Apply the Phase 7 migration and start the backend:
 
 ```powershell
-alembic upgrade head
-uvicorn backend.app.main:app --reload
+uv run alembic upgrade head
+uv run uvicorn backend.app.main:app --reload
 ```
 
 Generate a note from stored context:
@@ -628,7 +619,7 @@ Supported formats:
 Apply the migration and start the backend:
 
 ```powershell
-alembic upgrade head
+uv run alembic upgrade head
 docker compose -f deployment/compose.yaml up --build -d postgres backend
 ```
 
@@ -713,7 +704,7 @@ docker compose -f deployment/compose.yaml exec postgres `
 $env:TEST_DATABASE_URL = `
   "postgresql+psycopg://ai_quant:local_development_only@localhost:5432/ai_quant_test"
 
-pytest -m postgres
+uv run pytest -m postgres
 ```
 
 The tests reject database names that do not end in `_test`, apply all
@@ -758,20 +749,20 @@ volume.
 Run Python checks from the repository root:
 
 ```sh
-pytest
-ruff check .
-ruff format --check .
-mypy backend scanner
+uv run pytest
+uv run ruff check .
+uv run ruff format --check .
+uv run mypy ai backend rag scanner
 ```
 
 Run frontend checks from `frontend/`:
 
 ```sh
-npm run lint
-npm run typecheck
-npm test
-npm run build
-npm run format:check
+pnpm run lint
+pnpm run typecheck
+pnpm test
+pnpm run build
+pnpm run format:check
 ```
 
 ## Configuration

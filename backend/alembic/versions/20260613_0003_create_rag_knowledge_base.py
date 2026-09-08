@@ -10,7 +10,7 @@ from collections.abc import Sequence
 
 import sqlalchemy as sa
 from alembic import op
-from pgvector.sqlalchemy import VECTOR  # type: ignore[import-untyped]
+from pgvector.sqlalchemy import VECTOR
 from sqlalchemy.dialects import postgresql
 
 revision: str = "20260613_0003"

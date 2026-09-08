@@ -31,12 +31,12 @@ execution, AI report, or RAG functionality.
 Run commands from this directory:
 
 ```sh
-npm ci
-npm run dev
-npm run lint
-npm run typecheck
-npm test
-npm run build
+pnpm install --frozen-lockfile
+pnpm run dev
+pnpm run lint
+pnpm run typecheck
+pnpm test
+pnpm run build
 ```
 
 Set `VITE_API_BASE_URL` when the backend is not available at

@@ -110,11 +110,19 @@ attributed to migration changes.
 No architecture has changed. Reverting this phase restores the original code
 with no data migration.
 
-### 5. Phase 1: Migrate Package Management and Establish CI
+### 5. Phase 1: Migrate Package Management
+
+**Implementation status (September 8, 2026):** Completed on the migration
+branch. Python now uses uv and `uv.lock`, the frontend uses pnpm and
+`pnpm-lock.yaml`, local scripts and Docker images use frozen installs, and
+pytest reports the current coverage baseline. GitHub Actions remains deferred
+to Phase 10 by project decision.
 
 #### Goal
 
-Create the repeatable engineering foundation used by every later phase.
+Create a repeatable local and container engineering foundation used by every
+later phase. GitHub Actions is intentionally deferred until the final test
+pyramid and delivery workflow are established in Phase 10.
 
 #### Tasks
 
@@ -124,9 +132,6 @@ Create the repeatable engineering foundation used by every later phase.
   project management and `uv.lock`.
 - Update setup scripts, test scripts, Dockerfiles, Compose commands, and README
   examples to use pnpm and uv.
-- Add GitHub Actions jobs for Python quality checks, frontend quality checks,
-  PostgreSQL integration tests, and container builds.
-- Cache pnpm and uv artifacts without caching generated application data.
 - Add coverage collection, initially reporting current coverage without imposing
   an arbitrary high threshold.
 
@@ -134,10 +139,9 @@ Create the repeatable engineering foundation used by every later phase.
 
 - A fresh checkout can be installed with `uv sync --frozen` and
   `pnpm install --frozen-lockfile`.
-- Local scripts and CI execute the same lint, format, type-check, and test
-  commands.
+- Local scripts execute the same lint, format, type-check, and test commands
+  developers will later use in CI.
 - Only one Python lock file and one frontend lock file remain authoritative.
-- All GitHub Actions jobs pass.
 
 #### Rollback Point
 
@@ -544,19 +548,19 @@ branch:
 
 1. `chore: restore green migration baseline`
 2. `build: migrate package management to pnpm and uv`
-3. `ci: add frontend python postgres and container checks`
-4. `refactor(frontend): migrate application shell to nextjs`
-5. `feat(frontend): add tailwind and shared shadcn components`
-6. `feat(frontend): add react hook form and zod forms`
-7. `docs: define graphql contract and migration boundary`
-8. `feat(backend): add strawberry graphql foundation`
-9. `feat(graphql): migrate stock research queries`
-10. `feat(graphql): migrate scanner and research queries`
-11. `feat(frontend): add apollo and generated operations`
-12. `feat(graphql): add typed research mutations`
-13. `feat(ai): add structured provider abstraction`
-14. `feat(search): add postgres full text search`
-15. `test: add testcontainers and playwright workflows`
+3. `refactor(frontend): migrate application shell to nextjs`
+4. `feat(frontend): add tailwind and shared shadcn components`
+5. `feat(frontend): add react hook form and zod forms`
+6. `docs: define graphql contract and migration boundary`
+7. `feat(backend): add strawberry graphql foundation`
+8. `feat(graphql): migrate stock research queries`
+9. `feat(graphql): migrate scanner and research queries`
+10. `feat(frontend): add apollo and generated operations`
+11. `feat(graphql): add typed research mutations`
+12. `feat(ai): add structured provider abstraction`
+13. `feat(search): add postgres full text search`
+14. `test: add testcontainers and playwright workflows`
+15. `ci: add frontend python postgres and container checks`
 16. `refactor: remove transitional vite and rest code`
 17. `docs: publish final architecture and portfolio guide`
 
@@ -566,7 +570,7 @@ and tests. Do not combine unrelated phases merely to match this list.
 ### 17. Migration Completion Checklist
 
 - [x] Existing baseline is green.
-- [ ] pnpm and uv are the only package-management workflows.
+- [x] pnpm and uv are the only package-management workflows.
 - [ ] GitHub Actions validates every supported layer.
 - [ ] Next.js App Router serves all documented frontend routes.
 - [ ] Tailwind and used shadcn/ui components form the UI foundation.

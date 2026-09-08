@@ -15,11 +15,11 @@ fi
 cd "${PROJECT_ROOT}"
 
 if [[ "${target}" == "all" || "${target}" == "python" ]]; then
-  find_python
+  find_uv
   echo "Running Python checks..."
-  "${PYTHON[@]}" -m ruff check .
-  "${PYTHON[@]}" -m ruff format --check .
-  "${PYTHON[@]}" -m mypy ai backend rag scanner
+  "${UV[@]}" run --frozen ruff check .
+  "${UV[@]}" run --frozen ruff format --check .
+  "${UV[@]}" run --frozen mypy ai backend rag scanner
   (
     test_workdir="$(mktemp -d "${PROJECT_ROOT}/.pytest-run.XXXXXX")"
     alembic_script_location="${PROJECT_ROOT}/backend/alembic"
@@ -28,15 +28,19 @@ if [[ "${target}" == "all" || "${target}" == "python" ]]; then
     pytest_backend="${PROJECT_ROOT}/backend/tests"
     pytest_scanner="${PROJECT_ROOT}/scanner/tests"
     pytest_cross_module="${PROJECT_ROOT}/tests"
+    uv_project="${PROJECT_ROOT}"
+    coverage_file="${pytest_cache}/.coverage"
     python_path="${PROJECT_ROOT}${PYTHONPATH:+:${PYTHONPATH}}"
 
-    if [[ "${PYTHON_USES_WINDOWS_PATHS:-false}" == true ]]; then
+    if [[ "${UV_USES_WINDOWS_PATHS:-false}" == true ]]; then
       alembic_script_location="$(wslpath -m "${alembic_script_location}")"
       pytest_config="$(wslpath -m "${pytest_config}")"
       pytest_cache="$(wslpath -m "${pytest_cache}")"
       pytest_backend="$(wslpath -m "${pytest_backend}")"
       pytest_scanner="$(wslpath -m "${pytest_scanner}")"
       pytest_cross_module="$(wslpath -m "${pytest_cross_module}")"
+      uv_project="$(wslpath -m "${uv_project}")"
+      coverage_file="$(wslpath -m "${coverage_file}")"
       python_path="$(wslpath -m "${PROJECT_ROOT}")"
     elif command -v cygpath >/dev/null 2>&1; then
       alembic_script_location="$(cygpath -m "${alembic_script_location}")"
@@ -52,10 +56,13 @@ if [[ "${target}" == "all" || "${target}" == "python" ]]; then
     trap cleanup_test_workdir EXIT
 
     cd "${test_workdir}"
-    PYTHONPATH="${python_path}" \
-      "${PYTHON[@]}" -m pytest \
+    COVERAGE_FILE="${coverage_file}" \
+      PYTHONPATH="${python_path}" \
+      "${UV[@]}" run --project "${uv_project}" --frozen pytest \
       -c "${pytest_config}" \
       -o "cache_dir=${pytest_cache}" \
+      --cov \
+      --cov-report=term-missing \
       "${pytest_backend}" \
       "${pytest_scanner}" \
       "${pytest_cross_module}"
@@ -63,14 +70,14 @@ if [[ "${target}" == "all" || "${target}" == "python" ]]; then
 fi
 
 if [[ "${target}" == "all" || "${target}" == "frontend" ]]; then
-  find_npm
+  find_pnpm
   echo "Running frontend checks..."
   (
     cd frontend
-    "${NPM[@]}" run format:check
-    "${NPM[@]}" run lint
-    "${NPM[@]}" run typecheck
-    "${NPM[@]}" test
-    "${NPM[@]}" run build
+    "${PNPM[@]}" run format:check
+    "${PNPM[@]}" run lint
+    "${PNPM[@]}" run typecheck
+    "${PNPM[@]}" test
+    "${PNPM[@]}" run build
   )
 fi

@@ -1,18 +1,27 @@
+FROM ghcr.io/astral-sh/uv:0.12.10 AS uv
+
 FROM python:3.11-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
+    PYTHONUNBUFFERED=1 \
+    UV_COMPILE_BYTECODE=1 \
+    UV_LINK_MODE=copy \
+    PATH="/app/.venv/bin:$PATH"
 
 WORKDIR /app
 
-COPY pyproject.toml README.md requirements.lock alembic.ini ./
+COPY --from=uv /uv /uvx /bin/
+COPY pyproject.toml README.md uv.lock ./
+
+RUN uv sync --frozen --no-dev --no-install-project
+
+COPY alembic.ini ./
 COPY ai ./ai
 COPY backend ./backend
 COPY rag ./rag
 COPY scanner ./scanner
 
-RUN pip install --no-cache-dir -r requirements.lock \
-    && pip install --no-cache-dir --no-deps .
+RUN uv sync --frozen --no-dev --no-editable
 
 EXPOSE 8000
 

@@ -143,44 +143,31 @@ wait_for_service() {
   exit 1
 }
 
-find_python() {
-  local candidates=(
-    "${PROJECT_ROOT}/.venv/bin/python"
-    "${PROJECT_ROOT}/.venv/Scripts/python.exe"
-  )
-  local candidate
-
-  for candidate in "${candidates[@]}"; do
-    if [[ -x "${candidate}" ]]; then
-      PYTHON=("${candidate}")
-      if is_wsl && [[ "${candidate}" == *.exe ]]; then
-        PYTHON_USES_WINDOWS_PATHS=true
-      fi
-      return
+find_uv() {
+  if command -v uv >/dev/null 2>&1; then
+    UV=(uv)
+    if is_wsl && [[ "$(command -v uv)" == *.exe ]]; then
+      UV_USES_WINDOWS_PATHS=true
     fi
-  done
-
-  if command -v python3.11 >/dev/null 2>&1; then
-    PYTHON=(python3.11)
-  elif command -v python3 >/dev/null 2>&1; then
-    PYTHON=(python3)
-  elif command -v python >/dev/null 2>&1; then
-    PYTHON=(python)
-  elif command -v py >/dev/null 2>&1; then
-    PYTHON=(py -3.11)
+  elif is_wsl && command -v cmd.exe >/dev/null 2>&1 && \
+      cmd.exe /d /c where uv.exe >/dev/null 2>&1; then
+    UV=(cmd.exe /d /c uv.exe)
+    UV_USES_WINDOWS_PATHS=true
   else
-    echo "Python 3.11-3.13 was not found." >&2
+    echo "uv was not found. Install uv 0.12.x and ensure it is on PATH." >&2
+    echo "Installation guide: https://docs.astral.sh/uv/getting-started/installation/" >&2
     exit 1
   fi
 }
 
-find_npm() {
-  if is_wsl && command -v cmd.exe >/dev/null 2>&1; then
-    NPM=(cmd.exe /d /c npm.cmd)
-  elif command -v npm >/dev/null 2>&1; then
-    NPM=(npm)
+find_pnpm() {
+  if is_wsl && command -v cmd.exe >/dev/null 2>&1 && \
+      cmd.exe /d /c where pnpm.cmd >/dev/null 2>&1; then
+    PNPM=(cmd.exe /d /c pnpm.cmd)
+  elif command -v pnpm >/dev/null 2>&1; then
+    PNPM=(pnpm)
   else
-    echo "npm was not found. Install Node.js and npm." >&2
+    echo "pnpm was not found. Enable Corepack or install pnpm 11." >&2
     exit 1
   fi
 }

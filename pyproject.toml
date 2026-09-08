@@ -22,13 +22,17 @@ dependencies = [
     "uvicorn[standard]>=0.34,<1.0",
 ]
 
-[project.optional-dependencies]
+[dependency-groups]
 dev = [
     "mypy>=1.15,<2.0",
     "pytest>=8.3,<9.0",
     "pytest-cov>=6.0,<8.0",
     "ruff>=0.11,<1.0",
 ]
+
+[tool.uv]
+required-version = ">=0.12.10,<0.13"
+constraint-dependencies = ["numpy<2.5"]
 
 [project.scripts]
 quant-scanner = "scanner.cli:main"

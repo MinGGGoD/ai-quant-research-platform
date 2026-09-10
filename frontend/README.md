@@ -1,6 +1,9 @@
 # Frontend
 
-React and TypeScript MVP dashboard for the AI Quant Research Platform.
+Next.js App Router, React, and TypeScript dashboard for the AI Quant Research
+Platform. The application uses Server Components for route and layout shells,
+and explicit Client Components for API-driven dashboard state and interactive
+charts.
 
 The dashboard consumes the FastAPI `/api/v1` read endpoints and displays active
 stocks, interactive K-line and volume data, stored technical signals, and recent
@@ -25,8 +28,16 @@ view reads `data/cache/baostock/30m_qfq/`; the 60-minute view reads
 `60m_qfq/` when present and otherwise derives 60-minute bars from paired
 30-minute records.
 
-It is a research viewer and contains no login, broker connection, trade
-execution, AI report, or RAG functionality.
+It is a research viewer and contains no login, broker connection, or trade
+execution functionality.
+
+The App Router exposes these browser routes:
+
+- `/`: dashboard summary and the default stock view
+- `/stocks/[exchange]/[symbol]`: directly addressable stock research view
+- `/scanner-runs/[runId]`: directly addressable scanner-run detail
+- `/documents`: server-rendered route shell for a later document workflow
+- `/research-notes`: server-rendered route shell for a later notes workflow
 
 Run commands from this directory:
 
@@ -37,7 +48,13 @@ pnpm run lint
 pnpm run typecheck
 pnpm test
 pnpm run build
+pnpm run start
 ```
 
-Set `VITE_API_BASE_URL` when the backend is not available at
-`http://localhost:8000`.
+Open `http://localhost:3000` during development. Set
+`NEXT_PUBLIC_API_BASE_URL` before building when the browser should call a
+backend other than `http://localhost:8000`. Server Components use
+`BACKEND_INTERNAL_URL`; Docker Compose sets it to `http://backend:8000`.
+
+`NEXT_PUBLIC_API_BASE_URL` is embedded in the browser bundle during the Next.js
+build. Changing it therefore requires rebuilding the frontend image.

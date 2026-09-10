@@ -7,7 +7,8 @@
 The MVP uses a small service-oriented architecture that runs locally with Docker
 Compose:
 
-- A React and TypeScript frontend provides the research dashboard.
+- A Next.js App Router, React, and TypeScript frontend provides the research
+  dashboard and directly addressable research routes.
 - A FastAPI backend exposes versioned APIs for dashboard data.
 - A Python scanner runs as a command-line job and persists scan results.
 - PostgreSQL stores market data references, scan runs, and signal results.
@@ -18,7 +19,7 @@ workflow engine, vector database, or LLM service.
 
 ```mermaid
 flowchart LR
-    User["Research User"] --> Frontend["React Dashboard"]
+    User["Research User"] --> Frontend["Next.js App Router"]
     Frontend -->|"HTTP / JSON"| Backend["FastAPI Backend"]
     Backend --> Database[("PostgreSQL")]
 
@@ -39,7 +40,8 @@ flowchart LR
 #### MVP Modules
 
 - `backend/`: FastAPI application, API schemas, database access, and migrations.
-- `frontend/`: React dashboard for scan history, results, filters, and charts.
+- `frontend/`: Next.js application for scan history, results, filters, charts,
+  and research feature routes.
 - `scanner/`: CLI entry point, market-data ingestion and validation, indicators,
   signal rules, and scan persistence.
 - `data/`: Local development fixtures, documented imports, and non-sensitive
@@ -57,6 +59,21 @@ flowchart LR
 Each module owns a clear responsibility. Cross-module contracts should remain
 small and explicit, especially database entities, API schemas, and signal
 definitions.
+
+#### Frontend Runtime Boundaries
+
+The root App Router layout owns document metadata and global CSS. The
+`(workspace)` route group adds the shared navigation, research-only notice, and
+footer without changing public URLs. Route pages and layouts remain Server
+Components by default. `App.tsx` is the client-side research workspace and
+coordinates the existing REST requests, URL transitions, local recent-stock
+storage, retry states, and focused dashboard panels. `KlineChart.tsx` is also an
+explicit Client Component because it owns pointer, keyboard, and viewport state.
+
+Browser requests read the build-time `NEXT_PUBLIC_API_BASE_URL`. Future Server
+Component requests read the runtime-only `BACKEND_INTERNAL_URL`, which Docker
+Compose maps to `http://backend:8000`. Keeping those values separate prevents a
+container-only hostname from leaking into browser requests.
 
 ### 3. Data Flow
 

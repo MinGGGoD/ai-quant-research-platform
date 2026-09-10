@@ -26,7 +26,7 @@ def test_default_database_url_uses_postgresql_and_psycopg() -> None:
 def test_default_cors_origin_is_local_frontend() -> None:
     settings = Settings()
 
-    assert settings.cors_origins == ["http://localhost:5173"]
+    assert settings.cors_origins == ["http://localhost:3000"]
 
 
 def test_asharehub_api_key_is_masked_in_settings_repr() -> None:

@@ -55,6 +55,6 @@ input:focus-visible {
   outline-offset: 2px;
 }
 
-#root {
+body {
   min-height: 100vh;
 }

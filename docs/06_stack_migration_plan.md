@@ -149,6 +149,14 @@ Application runtime behavior and API contracts are unchanged.
 
 ### 6. Phase 2: Migrate Vite to Next.js App Router
 
+**Implementation status (September 10, 2026):** Completed on the migration
+branch. The Vite runtime was replaced by Next.js 16 App Router, the shared
+workspace shell moved into a Server Component layout, the interactive dashboard
+was split into focused Client Components, and direct stock and scanner-run URLs
+now restore their selected state. The REST API remains unchanged. Static checks,
+21 component/data tests, the production build, backend tests, and Docker Compose
+smoke tests pass.
+
 #### Goal
 
 Move the existing interface to Next.js while continuing to use the current REST

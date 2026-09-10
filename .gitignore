@@ -17,7 +17,10 @@ htmlcov/
 # Node
 node_modules/
 frontend/dist/
+frontend/.next/
+frontend/out/
 frontend/coverage/
+frontend/*.tsbuildinfo
 
 # Editors and operating systems
 .idea/

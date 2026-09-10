@@ -1,8 +1,10 @@
+'use client'
+
+import { useRouter } from 'next/navigation'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 
 import {
-  ApiError,
   getScannerRunDetail,
   getScannerRuns,
   getSignalsForScannerRun,
@@ -11,9 +13,13 @@ import {
   getStocks,
   syncStockPrices,
 } from './api'
-import './App.css'
 import type { ChartInterval } from './chartData'
-import KlineChart from './components/KlineChart'
+import ScannerRunDetailPanel from './components/ScannerRunDetailPanel'
+import ScannerRunsPanel from './components/ScannerRunsPanel'
+import StockPanel from './components/StockPanel'
+import type { SelectedDateRange } from './components/StockPanel'
+import StockResearchPanel from './components/StockResearchPanel'
+import { errorMessage } from './formatters'
 import type {
   DailyPrice,
   Pagination,
@@ -31,41 +37,33 @@ const EMPTY_PAGINATION: Pagination = { limit: 30, offset: 0, total: 0 }
 const RECENT_STOCKS_KEY = 'ai-quant-recent-stocks'
 const RECENT_STOCK_LIMIT = 6
 
-interface SelectedDateRange {
-  fromDate: string
-  toDate: string
+type DetailRequestMode = 'cache' | 'sync'
+
+export interface StockRouteSelection {
+  symbol: string
+  exchange: Stock['exchange']
 }
 
-type DetailRequestMode = 'cache' | 'sync'
+interface AppProps {
+  initialStock?: StockRouteSelection
+  initialScannerRunId?: string
+}
 
 function frequencyForChartInterval(interval: ChartInterval): PriceFrequency {
   return interval === '30m' || interval === '60m' ? interval : 'daily'
 }
 
-function priceFrequencyLabel(frequency: PriceFrequency): string {
-  if (frequency === '30m') {
-    return '30-minute'
-  }
-  if (frequency === '60m') {
-    return '60-minute'
-  }
-  return 'daily'
-}
-
-function localIsoDate(value: Date): string {
-  const year = value.getFullYear()
-  const month = String(value.getMonth() + 1).padStart(2, '0')
-  const day = String(value.getDate()).padStart(2, '0')
-  return `${year}-${month}-${day}`
+function utcIsoDate(value: Date): string {
+  return value.toISOString().slice(0, 10)
 }
 
 function defaultDateRange(): SelectedDateRange {
   const end = new Date()
   const start = new Date(end)
-  start.setFullYear(start.getFullYear() - 2)
+  start.setUTCFullYear(start.getUTCFullYear() - 2)
   return {
-    fromDate: localIsoDate(start),
-    toDate: localIsoDate(end),
+    fromDate: utcIsoDate(start),
+    toDate: utcIsoDate(end),
   }
 }
 
@@ -97,47 +95,21 @@ function loadRecentStocks(): Stock[] {
   }
 }
 
-function formatNumber(value: number): string {
-  return new Intl.NumberFormat('en-US', {
-    maximumFractionDigits: 2,
-  }).format(value)
-}
-
-function formatDateTime(value: string): string {
-  return new Intl.DateTimeFormat('en', {
-    dateStyle: 'medium',
-    timeStyle: 'short',
-  }).format(new Date(value))
-}
-
-function humanize(value: string): string {
-  return value.replaceAll('_', ' ')
-}
-
-function formatJson(value: unknown): string {
-  try {
-    return JSON.stringify(value, null, 2) ?? '{}'
-  } catch {
-    return '{}'
-  }
-}
-
-function errorMessage(error: unknown): string {
-  if (error instanceof ApiError) {
-    return error.requestId
-      ? `${error.message} Request ID: ${error.requestId}`
-      : error.message
-  }
-  return 'The research data could not be loaded.'
-}
-
 function hasSyncMetadata(
   response: StockPricesResponse | StockPriceSyncResponse,
 ): response is StockPriceSyncResponse {
   return 'sync' in response
 }
 
-function App() {
+function stockPath(stock: StockRouteSelection): string {
+  return `/stocks/${stock.exchange}/${encodeURIComponent(stock.symbol)}`
+}
+
+export default function App({ initialStock, initialScannerRunId }: AppProps) {
+  const router = useRouter()
+  const pendingRouteStock = useRef<StockRouteSelection | null>(
+    initialStock ?? null,
+  )
   const [stocks, setStocks] = useState<Stock[]>([])
   const [stockPagination, setStockPagination] =
     useState<Pagination>(EMPTY_PAGINATION)
@@ -147,7 +119,9 @@ function App() {
   const [priceAdjustment, setPriceAdjustment] = useState('source_defined')
   const [signals, setSignals] = useState<TechnicalSignal[]>([])
   const [scannerRuns, setScannerRuns] = useState<ScannerRun[]>([])
-  const [selectedRunId, setSelectedRunId] = useState<string | null>(null)
+  const [selectedRunId, setSelectedRunId] = useState<string | null>(
+    initialScannerRunId ?? null,
+  )
   const [selectedRunDetail, setSelectedRunDetail] =
     useState<ScannerRunDetail | null>(null)
   const [selectedRunSignals, setSelectedRunSignals] = useState<
@@ -155,14 +129,16 @@ function App() {
   >([])
   const [syncMetadata, setSyncMetadata] =
     useState<StockPriceSyncMetadata | null>(null)
-  const [recentStocks, setRecentStocks] = useState<Stock[]>(loadRecentStocks)
-  const [searchInput, setSearchInput] = useState('')
-  const [activeQuery, setActiveQuery] = useState('')
+  const [recentStocks, setRecentStocks] = useState<Stock[]>([])
+  const [searchInput, setSearchInput] = useState(initialStock?.symbol ?? '')
+  const [activeQuery, setActiveQuery] = useState(initialStock?.symbol ?? '')
   const [stockOffset, setStockOffset] = useState(0)
   const [stocksLoading, setStocksLoading] = useState(true)
   const [detailLoading, setDetailLoading] = useState(false)
   const [runsLoading, setRunsLoading] = useState(true)
-  const [runDetailLoading, setRunDetailLoading] = useState(false)
+  const [runDetailLoading, setRunDetailLoading] = useState(
+    Boolean(initialScannerRunId),
+  )
   const [stocksError, setStocksError] = useState<string | null>(null)
   const [detailError, setDetailError] = useState<string | null>(null)
   const [syncWarning, setSyncWarning] = useState<string | null>(null)
@@ -182,8 +158,14 @@ function App() {
   const [runsReloadToken, setRunsReloadToken] = useState(0)
   const [runDetailReloadToken, setRunDetailReloadToken] = useState(0)
   const pendingSearchSync = useRef(false)
-  const today = localIsoDate(new Date())
+  const today = utcIsoDate(new Date())
   const priceFrequency = frequencyForChartInterval(chartInterval)
+
+  useEffect(() => {
+    // Browser storage is loaded after hydration so the server and first client render match.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setRecentStocks(loadRecentStocks())
+  }, [])
 
   const rememberStock = useCallback((stock: Stock) => {
     setRecentStocks((current) => {
@@ -230,6 +212,14 @@ function App() {
     [rememberStock],
   )
 
+  const openStock = useCallback(
+    (stock: Stock) => {
+      selectStock(stock)
+      router.push(stockPath(stock))
+    },
+    [router, selectStock],
+  )
+
   const changeChartInterval = useCallback(
     (nextInterval: ChartInterval) => {
       const currentFrequency = frequencyForChartInterval(chartInterval)
@@ -246,16 +236,31 @@ function App() {
     [chartInterval, selectedStock],
   )
 
-  const selectScannerRun = useCallback((runId: string) => {
-    setSelectedRunId(runId)
+  const selectScannerRun = useCallback(
+    (runId: string) => {
+      setSelectedRunId(runId)
+      setSelectedRunDetail(null)
+      setSelectedRunSignals([])
+      setRunDetailError(null)
+      setRunDetailLoading(true)
+      setRunSignalQuery('')
+      setRunSignalCode('')
+      setRunDetailReloadToken((value) => value + 1)
+      router.push(`/scanner-runs/${encodeURIComponent(runId)}`)
+    },
+    [router],
+  )
+
+  const closeScannerRun = useCallback(() => {
+    setSelectedRunId(null)
     setSelectedRunDetail(null)
     setSelectedRunSignals([])
     setRunDetailError(null)
-    setRunDetailLoading(true)
+    setRunDetailLoading(false)
     setRunSignalQuery('')
     setRunSignalCode('')
-    setRunDetailReloadToken((value) => value + 1)
-  }, [])
+    router.push('/')
+  }, [router])
 
   useEffect(() => {
     const controller = new AbortController()
@@ -264,9 +269,18 @@ function App() {
       .then((response) => {
         setStocks(response.items)
         setStockPagination(response.pagination)
+        const routeStock = pendingRouteStock.current
+        const nextStock = routeStock
+          ? (response.items.find(
+              (stock) =>
+                stock.symbol === routeStock.symbol &&
+                stock.exchange === routeStock.exchange,
+            ) ?? null)
+          : (response.items[0] ?? null)
+        pendingRouteStock.current = null
         const shouldSync = pendingSearchSync.current && stockOffset === 0
         selectStock(
-          response.items[0] ?? null,
+          nextStock,
           activeQuery.length > 0 && stockOffset === 0,
           shouldSync ? 'sync' : 'cache',
         )
@@ -477,9 +491,9 @@ function App() {
   const openRecentStock = useCallback(
     (stock: Stock) => {
       setSearchInput(stock.symbol)
-      selectStock(stock)
+      openStock(stock)
     },
-    [selectStock],
+    [openStock],
   )
 
   const runSignalCodes = useMemo(
@@ -516,631 +530,96 @@ function App() {
     })
   }, [runSignalCode, runSignalQuery, selectedRunSignals])
 
-  const latestPrice = prices.at(-1)
-  const previousPrice = prices.at(-2)
-  const priceChange =
-    latestPrice && previousPrice
-      ? latestPrice.close - previousPrice.close
-      : null
-  const canGoBack = stockPagination.offset > 0
-  const canGoForward =
-    stockPagination.offset + stockPagination.limit < stockPagination.total
-
   return (
-    <div className="app">
-      <header className="topbar">
-        <div>
-          <p className="eyebrow">A-share research workspace</p>
-          <h1>Quant Research Dashboard</h1>
-        </div>
-        <div className="research-boundary">
-          <span className="status-dot" aria-hidden="true" />
-          Research and education only
-        </div>
-      </header>
+    <main className="dashboard">
+      <StockPanel
+        stocks={stocks}
+        pagination={stockPagination}
+        selectedStock={selectedStock}
+        recentStocks={recentStocks}
+        searchInput={searchInput}
+        dateRange={dateRange}
+        today={today}
+        dateRangeError={dateRangeError}
+        loading={stocksLoading}
+        error={stocksError}
+        onSearchInputChange={setSearchInput}
+        onDateRangeChange={setDateRange}
+        onSubmit={submitSearch}
+        onRetry={() => {
+          setStocksLoading(true)
+          setStocksError(null)
+          setStockReloadToken((value) => value + 1)
+        }}
+        onSelectStock={openStock}
+        onOpenRecentStock={openRecentStock}
+        onPreviousPage={() => {
+          setStocksLoading(true)
+          setStocksError(null)
+          setStockOffset((offset) =>
+            Math.max(0, offset - stockPagination.limit),
+          )
+        }}
+        onNextPage={() => {
+          setStocksLoading(true)
+          setStocksError(null)
+          setStockOffset((offset) => offset + stockPagination.limit)
+        }}
+      />
 
-      <main className="dashboard">
-        <aside className="panel stock-panel" aria-labelledby="stocks-heading">
-          <div className="panel-heading">
-            <div>
-              <p className="section-kicker">Market universe</p>
-              <h2 id="stocks-heading">Stocks</h2>
-            </div>
-            <span className="count-badge">{stockPagination.total}</span>
-          </div>
+      <section className="main-column">
+        <StockResearchPanel
+          selectedStock={selectedStock}
+          prices={prices}
+          priceAdjustment={priceAdjustment}
+          chartInterval={chartInterval}
+          priceFrequency={priceFrequency}
+          signals={signals}
+          syncMetadata={syncMetadata}
+          syncWarning={syncWarning}
+          loading={detailLoading}
+          error={detailError}
+          requestMode={detailRequestMode}
+          onIntervalChange={changeChartInterval}
+          onRetry={() => {
+            setDetailLoading(true)
+            setDetailError(null)
+            setDetailReloadToken((value) => value + 1)
+          }}
+        />
+        <ScannerRunDetailPanel
+          selectedRunId={selectedRunId}
+          detail={selectedRunDetail}
+          signals={selectedRunSignals}
+          filteredSignals={filteredRunSignals}
+          signalCodes={runSignalCodes}
+          signalQuery={runSignalQuery}
+          signalCode={runSignalCode}
+          loading={runDetailLoading}
+          error={runDetailError}
+          onClose={closeScannerRun}
+          onRetry={() => {
+            setRunDetailLoading(true)
+            setRunDetailError(null)
+            setRunDetailReloadToken((value) => value + 1)
+          }}
+          onSignalQueryChange={setRunSignalQuery}
+          onSignalCodeChange={setRunSignalCode}
+        />
+      </section>
 
-          <form className="stock-search" onSubmit={submitSearch}>
-            <label htmlFor="stock-query">Search stocks</label>
-            <div className="search-row">
-              <input
-                id="stock-query"
-                type="search"
-                value={searchInput}
-                onChange={(event) => setSearchInput(event.target.value)}
-                placeholder="Code or name"
-              />
-              <button type="submit">Search</button>
-            </div>
-            <fieldset className="date-range">
-              <legend>Price period</legend>
-              <label htmlFor="price-from-date">
-                From
-                <input
-                  id="price-from-date"
-                  type="date"
-                  value={dateRange.fromDate}
-                  max={dateRange.toDate || today}
-                  required
-                  onChange={(event) =>
-                    setDateRange((current) => ({
-                      ...current,
-                      fromDate: event.target.value,
-                    }))
-                  }
-                />
-              </label>
-              <label htmlFor="price-to-date">
-                To
-                <input
-                  id="price-to-date"
-                  type="date"
-                  value={dateRange.toDate}
-                  min={dateRange.fromDate}
-                  max={today}
-                  required
-                  onChange={(event) =>
-                    setDateRange((current) => ({
-                      ...current,
-                      toDate: event.target.value,
-                    }))
-                  }
-                />
-              </label>
-            </fieldset>
-            {dateRangeError && (
-              <p className="date-range-error" role="alert">
-                {dateRangeError}
-              </p>
-            )}
-          </form>
-
-          {recentStocks.length > 0 && (
-            <div
-              className="recent-stocks"
-              aria-label="Recently searched stocks"
-            >
-              <span>Recent</span>
-              <div>
-                {recentStocks.map((stock) => (
-                  <button
-                    type="button"
-                    key={`${stock.exchange}:${stock.symbol}`}
-                    title={`${stock.symbol} / ${stock.exchange}`}
-                    aria-label={`Open recent stock ${stock.name} (${stock.symbol})`}
-                    onClick={() => openRecentStock(stock)}
-                  >
-                    {stock.name}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {stocksLoading ? (
-            <div className="loading-state" role="status">
-              Loading stocks...
-            </div>
-          ) : stocksError ? (
-            <div className="error-state" role="alert">
-              <p>{stocksError}</p>
-              <button
-                onClick={() => {
-                  setStocksLoading(true)
-                  setStocksError(null)
-                  setStockReloadToken((value) => value + 1)
-                }}
-              >
-                Retry
-              </button>
-            </div>
-          ) : stocks.length === 0 ? (
-            <div className="empty-state">No stocks match this search.</div>
-          ) : (
-            <div className="stock-list" role="listbox" aria-label="Stocks">
-              {stocks.map((stock) => (
-                <button
-                  className={
-                    stock.id === selectedStock?.id
-                      ? 'stock-item selected'
-                      : 'stock-item'
-                  }
-                  key={stock.id}
-                  onClick={() => selectStock(stock)}
-                  role="option"
-                  aria-selected={stock.id === selectedStock?.id}
-                >
-                  <span>
-                    <strong>{stock.symbol}</strong>
-                    <small>{stock.name}</small>
-                  </span>
-                  <span className="exchange-tag">{stock.exchange}</span>
-                </button>
-              ))}
-            </div>
-          )}
-
-          <div className="pagination-controls">
-            <button
-              disabled={!canGoBack}
-              onClick={() => {
-                setStocksLoading(true)
-                setStocksError(null)
-                setStockOffset((offset) =>
-                  Math.max(0, offset - stockPagination.limit),
-                )
-              }}
-            >
-              Previous
-            </button>
-            <span>
-              {stockPagination.total === 0
-                ? '0'
-                : `${stockPagination.offset + 1}-${Math.min(
-                    stockPagination.offset + stockPagination.limit,
-                    stockPagination.total,
-                  )}`}
-            </span>
-            <button
-              disabled={!canGoForward}
-              onClick={() => {
-                setStocksLoading(true)
-                setStocksError(null)
-                setStockOffset((offset) => offset + stockPagination.limit)
-              }}
-            >
-              Next
-            </button>
-          </div>
-        </aside>
-
-        <section className="main-column">
-          <section
-            className="panel chart-panel"
-            aria-labelledby="chart-heading"
-          >
-            {selectedStock ? (
-              <>
-                <div className="stock-summary">
-                  <div>
-                    <p className="section-kicker">
-                      {selectedStock.exchange} / {selectedStock.symbol}
-                    </p>
-                    <h2 id="chart-heading">{selectedStock.name}</h2>
-                  </div>
-                  <div className="market-summary" aria-label="Latest price">
-                    <span>Latest close</span>
-                    <strong>
-                      {latestPrice ? latestPrice.close.toFixed(2) : '--'}
-                    </strong>
-                    {priceChange !== null && (
-                      <small
-                        className={priceChange >= 0 ? 'positive' : 'negative'}
-                      >
-                        {priceChange >= 0 ? '+' : ''}
-                        {priceChange.toFixed(2)}
-                      </small>
-                    )}
-                  </div>
-                </div>
-
-                {detailLoading ? (
-                  <div className="loading-state chart-loading" role="status">
-                    {priceFrequency !== 'daily'
-                      ? `Loading ${priceFrequencyLabel(priceFrequency)} price history...`
-                      : detailRequestMode === 'sync'
-                        ? 'Synchronizing missing price history...'
-                        : 'Loading cached price history and technical signals...'}
-                  </div>
-                ) : detailError ? (
-                  <div className="error-state chart-error" role="alert">
-                    <p>{detailError}</p>
-                    <button
-                      onClick={() => {
-                        setDetailLoading(true)
-                        setDetailError(null)
-                        setDetailReloadToken((value) => value + 1)
-                      }}
-                    >
-                      Retry
-                    </button>
-                  </div>
-                ) : (
-                  <>
-                    {syncWarning && (
-                      <div className="sync-warning" role="status">
-                        {syncWarning}
-                      </div>
-                    )}
-                    <KlineChart
-                      key={`${selectedStock.exchange}:${selectedStock.symbol}`}
-                      prices={prices}
-                      interval={chartInterval}
-                      onIntervalChange={changeChartInterval}
-                    />
-                    <div className="chart-footer">
-                      <span>
-                        {prices.length} stored{' '}
-                        {priceFrequencyLabel(priceFrequency)} record
-                        {prices.length === 1 ? '' : 's'}
-                      </span>
-                      <span>
-                        Source: {latestPrice?.source ?? 'No price source'}
-                      </span>
-                      <span>
-                        Adjustment:{' '}
-                        {priceAdjustment === 'front_adjusted'
-                          ? 'Front adjusted'
-                          : 'Source defined'}
-                      </span>
-                      {syncMetadata && (
-                        <span>
-                          {syncMetadata.cache_hit
-                            ? 'Requested period already cached'
-                            : `Fetched ${syncMetadata.fetched_ranges.length} missing range${syncMetadata.fetched_ranges.length === 1 ? '' : 's'}; cached ${syncMetadata.prices_inserted} new record${syncMetadata.prices_inserted === 1 ? '' : 's'}`}
-                        </span>
-                      )}
-                    </div>
-                  </>
-                )}
-              </>
-            ) : (
-              <div className="empty-state chart-empty">
-                Select a stock to inspect its price history.
-              </div>
-            )}
-          </section>
-
-          <section
-            className="panel signals-panel"
-            aria-labelledby="signals-heading"
-          >
-            <div className="panel-heading">
-              <div>
-                <p className="section-kicker">Deterministic findings</p>
-                <h2 id="signals-heading">Technical signals</h2>
-              </div>
-              <span className="count-badge">{signals.length}</span>
-            </div>
-
-            {!selectedStock ? (
-              <div className="empty-state">Select a stock to view signals.</div>
-            ) : detailLoading ? (
-              <div className="loading-state" role="status">
-                Loading technical signals...
-              </div>
-            ) : detailError ? (
-              <div className="empty-state">
-                Signals are unavailable while stock details cannot be loaded.
-              </div>
-            ) : signals.length === 0 ? (
-              <div className="empty-state">
-                No technical signals are stored for this stock.
-              </div>
-            ) : (
-              <div className="signal-list">
-                {signals.map((signal) => (
-                  <article className="signal-card" key={signal.id}>
-                    <div className="signal-title">
-                      <div>
-                        <strong>{signal.signal.name}</strong>
-                        <span>
-                          {signal.signal.code} v{signal.signal.version}
-                        </span>
-                      </div>
-                      <time dateTime={signal.signal_date}>
-                        {signal.signal_date}
-                      </time>
-                    </div>
-                    <p>{signal.explanation}</p>
-                    <dl className="matched-values">
-                      {Object.entries(signal.matched_values)
-                        .slice(0, 4)
-                        .map(([key, value]) => (
-                          <div key={key}>
-                            <dt>{humanize(key)}</dt>
-                            <dd>
-                              {typeof value === 'number'
-                                ? formatNumber(value)
-                                : String(value)}
-                            </dd>
-                          </div>
-                        ))}
-                    </dl>
-                  </article>
-                ))}
-              </div>
-            )}
-          </section>
-
-          <section
-            className="panel run-detail-panel"
-            aria-labelledby="run-detail-heading"
-          >
-            <div className="panel-heading">
-              <div>
-                <p className="section-kicker">Execution detail</p>
-                <h2 id="run-detail-heading">Scanner run detail</h2>
-              </div>
-              {selectedRunId && (
-                <button
-                  className="secondary-action"
-                  type="button"
-                  onClick={() => {
-                    setSelectedRunId(null)
-                    setSelectedRunDetail(null)
-                    setSelectedRunSignals([])
-                    setRunDetailError(null)
-                    setRunDetailLoading(false)
-                    setRunSignalQuery('')
-                    setRunSignalCode('')
-                  }}
-                >
-                  Close
-                </button>
-              )}
-            </div>
-
-            {!selectedRunId ? (
-              <div className="empty-state">
-                Select a scanner run to inspect its configuration, status, and
-                matched technical signals.
-              </div>
-            ) : runDetailLoading ? (
-              <div className="loading-state" role="status">
-                Loading scanner run detail...
-              </div>
-            ) : runDetailError ? (
-              <div className="error-state" role="alert">
-                <p>{runDetailError}</p>
-                <button
-                  onClick={() => {
-                    setRunDetailLoading(true)
-                    setRunDetailError(null)
-                    setRunDetailReloadToken((value) => value + 1)
-                  }}
-                >
-                  Retry
-                </button>
-              </div>
-            ) : selectedRunDetail ? (
-              <div className="run-detail-content">
-                <div className="run-detail-header">
-                  <div>
-                    <span className={`run-status ${selectedRunDetail.status}`}>
-                      {humanize(selectedRunDetail.status)}
-                    </span>
-                    <h3>{selectedRunDetail.universe_name}</h3>
-                    <p>
-                      Market date {selectedRunDetail.data_date} - Started{' '}
-                      {formatDateTime(selectedRunDetail.started_at)}
-                    </p>
-                  </div>
-                  <div className="run-id-block">
-                    <span>Run ID</span>
-                    <code>{selectedRunDetail.id}</code>
-                  </div>
-                </div>
-
-                <dl className="run-detail-metrics">
-                  <div>
-                    <dt>Total</dt>
-                    <dd>{selectedRunDetail.summary.total_stocks}</dd>
-                  </div>
-                  <div>
-                    <dt>Processed</dt>
-                    <dd>{selectedRunDetail.summary.processed_stocks}</dd>
-                  </div>
-                  <div>
-                    <dt>Matched</dt>
-                    <dd>{selectedRunDetail.summary.matched_stocks}</dd>
-                  </div>
-                  <div>
-                    <dt>Warnings</dt>
-                    <dd>{selectedRunDetail.summary.warning_count}</dd>
-                  </div>
-                  <div>
-                    <dt>Errors</dt>
-                    <dd>{selectedRunDetail.summary.error_count}</dd>
-                  </div>
-                </dl>
-
-                {selectedRunDetail.error_message && (
-                  <div className="sync-warning" role="status">
-                    {selectedRunDetail.error_message}
-                  </div>
-                )}
-
-                <div className="run-parameters">
-                  <span>Parameters</span>
-                  <pre>{formatJson(selectedRunDetail.parameters)}</pre>
-                </div>
-
-                <div className="run-signal-heading">
-                  <div>
-                    <p className="section-kicker">Run matched signals</p>
-                    <h3>Detected signals</h3>
-                  </div>
-                  <span className="count-badge">
-                    {filteredRunSignals.length}/{selectedRunSignals.length}
-                  </span>
-                </div>
-
-                {selectedRunSignals.length > 0 && (
-                  <div className="run-signal-filters">
-                    <label htmlFor="run-signal-query">
-                      Filter run signals
-                      <input
-                        id="run-signal-query"
-                        type="search"
-                        value={runSignalQuery}
-                        placeholder="Stock, code, or explanation"
-                        onChange={(event) =>
-                          setRunSignalQuery(event.target.value)
-                        }
-                      />
-                    </label>
-                    <label htmlFor="run-signal-code">
-                      Signal type
-                      <select
-                        id="run-signal-code"
-                        value={runSignalCode}
-                        onChange={(event) =>
-                          setRunSignalCode(event.target.value)
-                        }
-                      >
-                        <option value="">All signals</option>
-                        {runSignalCodes.map((code) => (
-                          <option value={code} key={code}>
-                            {humanize(code)}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                  </div>
-                )}
-
-                {selectedRunSignals.length === 0 ? (
-                  <div className="empty-state">
-                    No signals are stored for this scanner run.
-                  </div>
-                ) : filteredRunSignals.length === 0 ? (
-                  <div className="empty-state">
-                    No run signals match this filter.
-                  </div>
-                ) : (
-                  <div className="signal-list">
-                    {filteredRunSignals.map((signal) => (
-                      <article className="signal-card" key={signal.id}>
-                        <div className="signal-title">
-                          <div>
-                            <strong>{signal.signal.name}</strong>
-                            <span>
-                              {signal.signal.code} v{signal.signal.version}
-                            </span>
-                            {signal.stock && (
-                              <span className="signal-stock">
-                                {signal.stock.symbol} / {signal.stock.exchange}{' '}
-                                - {signal.stock.name}
-                              </span>
-                            )}
-                          </div>
-                          <time dateTime={signal.signal_date}>
-                            {signal.signal_date}
-                          </time>
-                        </div>
-                        <p>{signal.explanation}</p>
-                        <dl className="matched-values">
-                          {Object.entries(signal.matched_values)
-                            .slice(0, 4)
-                            .map(([key, value]) => (
-                              <div key={key}>
-                                <dt>{humanize(key)}</dt>
-                                <dd>
-                                  {typeof value === 'number'
-                                    ? formatNumber(value)
-                                    : String(value)}
-                                </dd>
-                              </div>
-                            ))}
-                        </dl>
-                      </article>
-                    ))}
-                  </div>
-                )}
-              </div>
-            ) : null}
-          </section>
-        </section>
-
-        <aside className="panel runs-panel" aria-labelledby="runs-heading">
-          <div className="panel-heading">
-            <div>
-              <p className="section-kicker">Execution history</p>
-              <h2 id="runs-heading">Recent scanner runs</h2>
-            </div>
-          </div>
-
-          {runsLoading ? (
-            <div className="loading-state" role="status">
-              Loading scanner runs...
-            </div>
-          ) : runsError ? (
-            <div className="error-state" role="alert">
-              <p>{runsError}</p>
-              <button
-                onClick={() => {
-                  setRunsLoading(true)
-                  setRunsError(null)
-                  setRunsReloadToken((value) => value + 1)
-                }}
-              >
-                Retry
-              </button>
-            </div>
-          ) : scannerRuns.length === 0 ? (
-            <div className="empty-state">No scanner runs are stored yet.</div>
-          ) : (
-            <div className="run-list">
-              {scannerRuns.map((run) => (
-                <button
-                  className={
-                    run.id === selectedRunId ? 'run-card selected' : 'run-card'
-                  }
-                  key={run.id}
-                  type="button"
-                  aria-label={`Open scanner run ${run.universe_name} from ${run.data_date}`}
-                  aria-pressed={run.id === selectedRunId}
-                  onClick={() => selectScannerRun(run.id)}
-                >
-                  <div className="run-title">
-                    <span className={`run-status ${run.status}`}>
-                      {humanize(run.status)}
-                    </span>
-                    <time dateTime={run.started_at}>
-                      {formatDateTime(run.started_at)}
-                    </time>
-                  </div>
-                  <strong>{run.universe_name}</strong>
-                  <span className="run-date">Market date {run.data_date}</span>
-                  <dl className="run-metrics">
-                    <div>
-                      <dt>Processed</dt>
-                      <dd>
-                        {run.processed_stocks}/{run.total_stocks}
-                      </dd>
-                    </div>
-                    <div>
-                      <dt>Matched</dt>
-                      <dd>{run.matched_stocks}</dd>
-                    </div>
-                    <div>
-                      <dt>Warnings</dt>
-                      <dd>{run.warning_count}</dd>
-                    </div>
-                  </dl>
-                </button>
-              ))}
-            </div>
-          )}
-        </aside>
-      </main>
-
-      <footer>
-        Technical signals describe deterministic historical conditions. They are
-        not investment recommendations or trading instructions.
-      </footer>
-    </div>
+      <ScannerRunsPanel
+        runs={scannerRuns}
+        selectedRunId={selectedRunId}
+        loading={runsLoading}
+        error={runsError}
+        onRetry={() => {
+          setRunsLoading(true)
+          setRunsError(null)
+          setRunsReloadToken((value) => value + 1)
+        }}
+        onSelectRun={selectScannerRun}
+      />
+    </main>
   )
 }
-
-export default App

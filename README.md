@@ -14,7 +14,8 @@ research-document retrieval extensions:
 
 - FastAPI liveness, readiness, stock, price, scanner-run, and signal endpoints.
 - Python scanner CLI for market-data ingestion and technical signal detection.
-- Responsive React and TypeScript research dashboard.
+- Responsive Next.js App Router, React, and TypeScript research dashboard with
+  directly addressable stock and scanner-run views.
 - PostgreSQL, backend, frontend, and scanner Docker Compose definitions.
 - Python and frontend formatting, linting, type checking, and test tooling.
 - SQLAlchemy 2.x models for stocks, daily prices, scanner runs, versioned signal
@@ -148,10 +149,12 @@ pnpm install --frozen-lockfile
 pnpm run dev
 ```
 
-Open `http://localhost:5173`.
+Open `http://localhost:3000`.
 
-The dashboard reads `VITE_API_BASE_URL`, which defaults to
-`http://localhost:8000`. Start PostgreSQL and the backend first:
+The browser bundle reads `NEXT_PUBLIC_API_BASE_URL`, which defaults to
+`http://localhost:8000`; this public value is fixed at build time. Server
+Components use the runtime-only `BACKEND_INTERNAL_URL`. Start PostgreSQL and the
+backend first:
 
 ```powershell
 docker compose -f deployment/compose.yaml up -d postgres backend
@@ -553,7 +556,7 @@ authentication in the local MVP and contains no broker, order, execution, or
 agent endpoints.
 
 Browser access is restricted to origins in `AQR_CORS_ORIGINS`, represented as a
-JSON array. The default allows only `http://localhost:5173`.
+JSON array. The default allows only `http://localhost:3000`.
 
 ## AI Research Notes
 
@@ -682,7 +685,7 @@ docker compose -f deployment/compose.yaml up --build -d
 
 Open:
 
-- Dashboard: `http://localhost:5173`
+- Dashboard: `http://localhost:3000`
 - API documentation: `http://localhost:8000/docs`
 
 Import sufficient market history and run the scanner through the documented
@@ -723,7 +726,7 @@ docker compose -f deployment/compose.yaml up --build
 
 The default local ports are:
 
-- Frontend: `5173`
+- Frontend: `3000`
 - Backend: `8000`
 - PostgreSQL: `5432`
 

@@ -6,9 +6,25 @@ import {
   waitFor,
   within,
 } from '@testing-library/react'
+import type { ComponentProps } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import App from './App'
+import ResearchApp from './App'
+import SiteShell from './components/SiteShell'
+
+const { pushMock } = vi.hoisted(() => ({ pushMock: vi.fn() }))
+
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ push: pushMock }),
+}))
+
+function App(props: ComponentProps<typeof ResearchApp>) {
+  return (
+    <SiteShell>
+      <ResearchApp {...props} />
+    </SiteShell>
+  )
+}
 
 const stocks = [
   {
@@ -275,6 +291,7 @@ afterEach(() => {
   window.localStorage.clear()
   vi.unstubAllGlobals()
   vi.restoreAllMocks()
+  pushMock.mockReset()
 })
 
 describe('App', () => {
@@ -314,6 +331,7 @@ describe('App', () => {
         name: 'Open scanner run synthetic_universe from 2026-06-12',
       }),
     )
+    expect(pushMock).toHaveBeenCalledWith('/scanner-runs/run-1')
 
     const detail = screen.getByRole('region', { name: 'Scanner run detail' })
     expect(
@@ -401,6 +419,7 @@ describe('App', () => {
     fireEvent.click(
       screen.getByRole('option', { name: /000001Synthetic BetaSZSE/i }),
     )
+    expect(pushMock).toHaveBeenCalledWith('/stocks/SZSE/000001')
 
     expect(
       await screen.findByRole('heading', { name: 'Synthetic Beta' }),
@@ -555,5 +574,29 @@ describe('App', () => {
       ),
     ).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument()
+  })
+
+  it('honors a stock selected by a directly loaded App Router route', async () => {
+    installSuccessfulFetch()
+
+    render(<App initialStock={{ exchange: 'SZSE', symbol: '000001' }} />)
+
+    expect(screen.getByLabelText('Search stocks')).toHaveValue('000001')
+    expect(
+      await screen.findByRole('heading', { name: 'Synthetic Beta' }),
+    ).toBeInTheDocument()
+  })
+
+  it('honors a scanner run selected by a directly loaded App Router route', async () => {
+    installSuccessfulFetch()
+
+    render(<App initialScannerRunId="run-1" />)
+
+    const detail = screen.getByRole('region', { name: 'Scanner run detail' })
+    expect(
+      await within(detail).findByText(
+        'One stock had insufficient lookback history.',
+      ),
+    ).toBeInTheDocument()
   })
 })

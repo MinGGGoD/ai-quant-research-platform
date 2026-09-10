@@ -39,7 +39,7 @@ wait_for_service frontend
 
 echo
 echo "AI Quant Research Platform is running."
-frontend_address="$(compose port frontend 5173 | tail -n 1)"
+frontend_address="$(compose port frontend 3000 | tail -n 1)"
 backend_address="$(compose port backend 8000 | tail -n 1)"
 echo "Dashboard: http://localhost:${frontend_address##*:}"
 echo "API docs:  http://localhost:${backend_address##*:}/docs"

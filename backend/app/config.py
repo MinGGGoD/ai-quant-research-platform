@@ -17,7 +17,7 @@ class Settings(BaseSettings):
         "postgresql+psycopg://ai_quant:local_development_only@localhost:5432/ai_quant"
     )
     database_echo: bool = False
-    cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:5173"])
+    cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:3000"])
     asharehub_api_key: SecretStr | None = None
     asharehub_timeout_seconds: float = Field(default=20.0, gt=0, le=120)
     asharehub_sync_max_requests: int = Field(default=20, ge=1, le=100)

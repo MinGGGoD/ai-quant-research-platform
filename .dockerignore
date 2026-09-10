@@ -8,6 +8,9 @@
 **/node_modules
 frontend/dist
 frontend/coverage
+frontend/.next
+frontend/out
+frontend/*.tsbuildinfo
 data/local
 .env
 *.log

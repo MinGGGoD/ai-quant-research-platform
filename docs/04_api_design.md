@@ -962,7 +962,7 @@ search. A missing identifier returns `404 document_not_found`.
 ### 15. Frontend and Browser Considerations
 
 - Configure CORS only for explicit local frontend origins, such as
-  `http://localhost:5173`; do not use unrestricted origins outside isolated
+  `http://localhost:3000`; do not use unrestricted origins outside isolated
   development.
 - Keep API base URLs configurable through frontend environment settings.
 - Use request IDs from error responses when showing diagnostic details.

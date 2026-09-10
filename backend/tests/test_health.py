@@ -29,10 +29,10 @@ def test_cors_allows_only_configured_local_frontend() -> None:
         ) as client:
             return await client.get("/health", headers={"Origin": origin})
 
-    allowed = asyncio.run(request_health("http://localhost:5173"))
+    allowed = asyncio.run(request_health("http://localhost:3000"))
     disallowed = asyncio.run(request_health("https://example.com"))
 
-    assert allowed.headers["access-control-allow-origin"] == "http://localhost:5173"
+    assert allowed.headers["access-control-allow-origin"] == "http://localhost:3000"
     assert "access-control-allow-origin" not in disallowed.headers
 
 
@@ -46,7 +46,7 @@ def test_cors_allows_research_note_post_from_local_frontend() -> None:
             return await client.options(
                 "/api/v1/stocks/600519/research-notes",
                 headers={
-                    "Origin": "http://localhost:5173",
+                    "Origin": "http://localhost:3000",
                     "Access-Control-Request-Method": "POST",
                     "Access-Control-Request-Headers": "content-type",
                 },
